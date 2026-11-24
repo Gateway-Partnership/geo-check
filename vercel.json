@@ -1,0 +1,10 @@
+{ "cleanUrls": false,
+  "rewrites": [
+    { "source": "/api/result", "has": [ { "type": "query", "key": "key", "value": "(?<k>[A-Za-z0-9._-]+)" } ], "destination": "/data/:k/result.json" },
+    { "source": "/api/tile", "has": [ { "type": "query", "key": "z", "value": "(?<z>[0-9]+)" }, { "type": "query", "key": "x", "value": "(?<x>[0-9]+)" }, { "type": "query", "key": "y", "value": "(?<y>[0-9]+)" } ], "destination": "/tiles/:z/:x/:y.jpg" }
+  ],
+  "headers": [
+    { "source": "/(.*)", "headers": [ { "key": "X-Robots-Tag", "value": "noindex, nofollow" } ] },
+    { "source": "/static/assets/(.*)", "headers": [ { "key": "Cache-Control", "value": "public, max-age=604800" } ] },
+    { "source": "/data/(.*)", "headers": [ { "key": "Cache-Control", "value": "no-cache" } ] }
+  ] }
