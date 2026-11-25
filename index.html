@@ -2,27 +2,354 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
 <meta name="theme-color" content="#FFFAF4">
 <title>AI 会推荐你的店吗</title>
-<link rel="preload" href="/static/assets/jost-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="/static/story.css">
 </head>
 <body>
-<header class="top"><div class="top__in">
-  <nav class="rail" id="rail" aria-label="这一页的几段" hidden></nav>
-  <button type="button" class="lang" id="lang" aria-label="切换语言 / Switch language">English</button>
-</div></header>
+<header class="top" id="top">
+  <div class="wrap top__in">
+    <div class="brand"><i aria-hidden="true"></i>GEO Check</div>
+    <a href="#geo" class="hide-s" id="toGeo">什么是 GEO</a>
+    <a href="#how" class="hide-s" id="toHow">报告里有什么</a>
+    <a href="#loading" class="pill" id="toDemo">看示例报告</a>
+    <!-- 下面两个只在报告页出现：目录条（加载时也是进度）和「换一家店」 -->
+    <nav class="rail glass" aria-label="报告目录"><div class="rail__in" id="rail"><span class="hl" aria-hidden="true"></span></div></nav>
+    <button type="button" class="ghost glass" id="other">换一家店</button>
+  </div>
+</header>
+<div class="prog" id="prog" hidden><i></i></div>
 
-<main class="stage" id="stage"></main>
-<button type="button" class="resume" id="resume" hidden>继续自动播放</button>
+<main id="app">
+  <!-- 首页 -->
+  <section class="view" id="v-home">
+    <div class="wrap hero">
+      <div class="hero__copy">
+        <p class="kicker">给餐厅老板的 AI 曝光检查</p>
+        <h1><span class="nw">客人问 AI</span><span class="nw">「附近哪家好吃」，</span><span class="soft"><span class="nw">AI 会说出</span><span class="nw">你的店名吗？</span></span></h1>
+        <p class="lead">输入店名或官网。我们替你问 <b>30+ 次 AI</b>，查 <b>15+ 个平台</b>，在你店周围 <b>9 个路口</b>搜地图，1 分钟后告诉你差在哪。</p>
+        <form class="ask" id="ask" novalidate>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg>
+          <input id="q" type="text" autocomplete="off" spellcheck="false" placeholder="店名或官网，比如 baonoodlehouse.com" aria-label="店名或官网">
+          <button class="btn" type="submit">查我的店<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 7l5 5-5 5"/></svg></button>
+        </form>
+        <p class="hint" id="hint" aria-live="polite"><span>免费</span><span>约 1 分钟</span><span>只替你问，不改你的任何资料</span></p>
+      </div>
 
-<footer class="foot">
-  <p id="foot">只替你问 AI，不改你的任何资料。</p>
-</footer>
+      <div class="chat" id="chat" aria-label="示例：客人正在问 AI 去哪吃">
+        <div class="chat__head">
+          <p class="who"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5c.5 4.6 2.9 7 7.5 7.5-4.6.5-7 2.9-7.5 7.5-.5-4.6-2.9-7-7.5-7.5 4.6-.5 7-2.9 7.5-7.5Z"/><path d="M19 15.5c.2 1.8 1.1 2.7 2.9 2.9-1.8.2-2.7 1.1-2.9 2.9-.2-1.8-1.1-2.7-2.9-2.9 1.8-.2 2.7-1.1 2.9-2.9Z" opacity=".55"/></svg>AI 的回答</p>
+          <span class="chat__tag">示例</span>
+        </div>
+        <p class="chat__lab"><span>推荐了这几家</span><span class="verdict" id="verdict"></span></p>
+        <ol class="ans" id="ans">
+          <li><span class="n">1</span><span class="line"><span class="sk" style="--w:62%"></span><span class="nm"></span></span><span class="you">你</span></li>
+          <li><span class="n">2</span><span class="line"><span class="sk" style="--w:48%"></span><span class="nm"></span></span><span class="you">你</span></li>
+          <li><span class="n">3</span><span class="line"><span class="sk" style="--w:70%"></span><span class="nm"></span></span><span class="you">你</span></li>
+          <li><span class="n">4</span><span class="line"><span class="sk" style="--w:54%"></span><span class="nm"></span></span><span class="you">你</span></li>
+        </ol>
+        <div class="composer" id="composer" aria-hidden="true">
+          <span class="composer__text"><span id="typed"></span><i class="caret"></i></span>
+          <span class="send"><svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg></span>
+        </div>
+        <p class="gloss" id="gloss"></p>
+      </div>
+    </div>
 
-<noscript><p style="padding:24px;text-align:center">这一页要打开 JavaScript 才能用。 This page needs JavaScript.</p></noscript>
+    <section class="wrap gx" id="geo">
+      <p class="gx-k">什么是 GEO</p>
+      <h2 class="gx-h" data-light>AI 推荐谁，<span class="a">客人就去谁那里</span>。</h2>
+      <div class="gx-vs">
+        <div class="gx-c">
+          <p class="gx-c__k"><i>以前</i>客人上 Google 搜</p>
+          <div class="gx-c__box" aria-hidden="true">
+            <div class="gx-search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg>best soup dumplings near me</div>
+            <div class="gx-link" style="--i:0;--w:58%"><i></i><i></i></div><div class="gx-link" style="--i:1;--w:72%"><i></i><i></i></div><div class="gx-link" style="--i:2;--w:50%"><i></i><i></i></div><div class="gx-link" style="--i:3;--w:66%"><i></i><i></i></div><div class="gx-link" style="--i:4;--w:61%"><i></i><i></i></div>
+            <p class="gx-more">还有 5 条结果，再往下翻还有好几页</p>
+          </div>
+          <p class="cap"><b>10 个链接，客人自己比。</b>排在第 7 名，也还有人会点进来看看。</p>
+        </div>
+        <div class="gx-c now">
+          <p class="gx-c__k"><i>现在</i>客人直接问 AI</p>
+          <div class="gx-c__box" aria-hidden="true">
+            <p class="gx-q">best soup dumplings near me</p>
+            <p class="gx-lab">AI 推荐了这几家</p>
+            <div class="gx-pick" style="--i:0"><span>1</span>Lucky Bowl</div><div class="gx-pick" style="--i:1"><span>2</span>Golden Reed</div><div class="gx-pick" style="--i:2"><span>3</span>Pell St. Kitchen</div>
+            <div class="gx-pick miss" style="--i:3"><span>–</span>你的店不在名单里</div>
+          </div>
+          <p class="cap"><b>AI 只说 3 到 5 家，客人多半就去这几家。</b>不在名单里，客人就不知道有你。</p>
+        </div>
+      </div>
+      <div class="gx-ex">
+        <div class="gx-ex__t">
+          <p>举个例子（示例数据）</p>
+          <h3>同样的问题问 AI 32 次，<em>差的 6 次，客人去了别家</em>。</h3>
+          <p class="s">每个点是一次提问，实心的是 AI 推荐了这家店。</p>
+        </div>
+        <div class="gx-rows" aria-label="示例：附近一家店被推荐 16 次，你的店 10 次">
+          <div class="gx-row"><p><span>附近的一家店</span><b>16</b></p><div class="gx-dots"><i class="y" style="--i:0"></i><i class="" style="--i:1"></i><i class="y" style="--i:2"></i><i class="y" style="--i:3"></i><i class="" style="--i:4"></i><i class="y" style="--i:5"></i><i class="" style="--i:6"></i><i class="y" style="--i:7"></i><i class="y" style="--i:8"></i><i class="" style="--i:9"></i><i class="y" style="--i:10"></i><i class="" style="--i:11"></i><i class="" style="--i:12"></i><i class="y" style="--i:13"></i><i class="y" style="--i:14"></i><i class="" style="--i:15"></i><i class="y" style="--i:16"></i><i class="" style="--i:17"></i><i class="" style="--i:18"></i><i class="y" style="--i:19"></i><i class="" style="--i:20"></i><i class="y" style="--i:21"></i><i class="" style="--i:22"></i><i class="" style="--i:23"></i><i class="y" style="--i:24"></i><i class="" style="--i:25"></i><i class="y" style="--i:26"></i><i class="" style="--i:27"></i><i class="y" style="--i:28"></i><i class="" style="--i:29"></i><i class="y" style="--i:30"></i><i class="" style="--i:31"></i></div></div>
+          <div class="gx-row me"><p><span>你的店</span><b>10</b></p><div class="gx-dots"><i class="" style="--i:8"></i><i class="y" style="--i:9"></i><i class="" style="--i:10"></i><i class="y" style="--i:11"></i><i class="" style="--i:12"></i><i class="" style="--i:13"></i><i class="y" style="--i:14"></i><i class="" style="--i:15"></i><i class="" style="--i:16"></i><i class="y" style="--i:17"></i><i class="" style="--i:18"></i><i class="" style="--i:19"></i><i class="y" style="--i:20"></i><i class="" style="--i:21"></i><i class="" style="--i:22"></i><i class="y" style="--i:23"></i><i class="" style="--i:24"></i><i class="" style="--i:25"></i><i class="y" style="--i:26"></i><i class="" style="--i:27"></i><i class="" style="--i:28"></i><i class="" style="--i:29"></i><i class="y" style="--i:30"></i><i class="" style="--i:31"></i><i class="" style="--i:32"></i><i class="y" style="--i:33"></i><i class="" style="--i:34"></i><i class="" style="--i:35"></i><i class="" style="--i:36"></i><i class="y" style="--i:37"></i><i class="" style="--i:38"></i><i class="" style="--i:39"></i></div></div>
+        </div>
+      </div>
+      <div class="gx-def">
+        <h3 data-light>让 AI 说到你、<span class="a">把你说对</span>，这件事叫 GEO。</h3>
+        <p>GEO 是 Generative Engine Optimization，生成式引擎优化。GEO Check 帮你看清：AI 现在怎么说你，和对手差在哪，先改哪里。</p>
+      </div>
+    </section>
+
+    <div class="wrap band">
+      <h2>替你查这 30+ 个地方</h2>
+      <p>点评、外卖、社交、美食媒体。AI 回答之前，也是先看这些。</p>
+    </div>
+    <div class="marquee" aria-label="我们会检查的平台">
+      <ul class="mq" id="mq1"></ul>
+      <ul class="mq rev" id="mq2"></ul>
+    </div>
+
+    <div class="wrap">
+      <section class="show" id="how">
+        <div class="show__head">
+          <h2><span class="nw">1 分钟后，</span><span class="nw">你会拿到一份这样的报告</span></h2>
+          <p>一份报告 7 个部分，一分钟看完，每一部分都拿你和附近的对手比。</p>
+        </div>
+        <div class="show__body" id="showBody">
+          <div class="toc" role="tablist" aria-label="报告内容">
+            <span class="hl" aria-hidden="true"></span>
+            <button type="button" role="tab" id="ti-0" aria-controls="card-0" aria-selected="true" class="on"><i class="dot"></i>你的得分</button>
+            <button type="button" role="tab" id="ti-1" aria-controls="card-1" aria-selected="false"><i class="dot"></i>AI 怎么说</button>
+            <button type="button" role="tab" id="ti-2" aria-controls="card-2" aria-selected="false"><i class="dot"></i>AI 看哪些网站</button>
+            <button type="button" role="tab" id="ti-3" aria-controls="card-3" aria-selected="false"><i class="dot"></i>地图上排第几</button>
+            <button type="button" role="tab" id="ti-4" aria-controls="card-4" aria-selected="false"><i class="dot"></i>哪些平台上没有你</button>
+            <span class="lock" aria-disabled="true" title="完整报告里才有"><i class="dot"></i><span>口碑和对手比</span><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2.2"/><path d="M8.5 11V8a3.5 3.5 0 0 1 7 0v3"/></svg></span>
+            <span class="lock" aria-disabled="true" title="完整报告里才有"><i class="dot"></i><span>做得好的和要改的</span><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2.2"/><path d="M8.5 11V8a3.5 3.5 0 0 1 7 0v3"/></svg></span>
+            <span class="lock" aria-disabled="true" title="完整报告里才有"><i class="dot"></i><span>先做这几件事</span><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2.2"/><path d="M8.5 11V8a3.5 3.5 0 0 1 7 0v3"/></svg></span>
+            <p class="toc__more">还有 3 项，在完整报告里</p>
+          </div>
+          <div class="stage">
+            <article class="card" id="card-0" role="tabpanel" aria-labelledby="ti-0"><div class="card__in">
+              <div class="card__h"><h3>你的得分</h3><span>示例</span></div>
+              <div class="c-score">
+                <div class="ring"><svg viewBox="0 0 104 104" aria-hidden="true"><circle class="r0" cx="52" cy="52" r="46"/><circle class="r1" cx="52" cy="52" r="46"/></svg><p><b>52</b><small>/ 100</small></p></div>
+                <div><p class="c-big">52 分<span class="band-tag">一般</span></p><p class="c-sub">7 个方面综合打分，下面是丢分最多的三项</p></div>
+              </div>
+              <ul class="lost">
+                <li style="--i:0"><span>媒体和论坛很少提到你</span><i><b style="--w:27%"></b></i><em>27</em></li>
+                <li style="--i:1"><span>你的官网，AI 读不到</span><i><b style="--w:30%"></b></i><em>30</em></li>
+                <li style="--i:2"><span>AI 很少推荐你</span><i><b style="--w:31%"></b></i><em>31</em></li>
+              </ul>
+              <div class="c-next">
+                <p class="c-ok"><span>Google 评分 4.8</span><span>各平台电话地址都对得上</span></p>
+                <div class="c-proj"><span>先做 3 件事，预计</span><i><b></b><em></em></i><strong>70 分</strong></div>
+              </div>
+            </div></article>
+            <article class="card" id="card-1" role="tabpanel" aria-labelledby="ti-1"><div class="card__in">
+              <div class="card__h"><h3>AI 怎么说</h3><span>示例</span></div>
+              <p class="c-big">32 次提问里，AI 推荐你<b>10</b>次</p>
+              <div class="p-bars">
+                <div style="--i:0"><span>Shanghai 21</span><i style="--w:100%"></i><b>16</b></div>
+                <div style="--i:1"><span>Deluxe Green Bo</span><i style="--w:94%"></i><b>15</b></div>
+                <div style="--i:2"><span>Joe’s Shanghai</span><i style="--w:81%"></i><b>13</b></div>
+                <div class="me" style="--i:3"><span>你的店</span><i style="--w:62%"></i><b>10</b></div>
+              </div>
+            </div></article>
+            <article class="card" id="card-2" role="tabpanel" aria-labelledby="ti-2"><div class="card__in">
+              <div class="card__h"><h3>AI 看哪些网站</h3><span>示例</span></div>
+              <div><p class="c-big">AI 看了 104 次网站，你的官网<b>0</b>次</p><p class="c-sub" style="margin-top:6px">AI 回答前先上网查。它看谁的网站多，就容易推荐谁。</p></div>
+              <div class="p-bars p-bars--src">
+                <div style="--i:0"><span>别家餐厅的官网</span><i style="--w:100%"></i><b>59</b></div>
+                <div style="--i:1"><span>美食媒体和论坛</span><i style="--w:39%"></i><b>23</b></div>
+                <div style="--i:2"><span>点评、外卖平台</span><i style="--w:37%"></i><b>22</b></div>
+                <div class="me" style="--i:3"><span>你的官网</span><i style="--w:1%"></i><b>0</b></div>
+              </div>
+            </div></article>
+            <article class="card" id="card-3" role="tabpanel" aria-labelledby="ti-3"><div class="card__in">
+              <div class="card__h"><h3>地图上排第几</h3><span>示例</span></div>
+              <div class="c-map">
+                <div class="map" aria-hidden="true">
+                  <svg viewBox="0 0 300 300" preserveAspectRatio="none">
+                    <line x1="-20" y1="60" x2="320" y2="20" stroke-width="10"/><line x1="-20" y1="160" x2="320" y2="120" stroke-width="14"/><line x1="-20" y1="260" x2="320" y2="220" stroke-width="10"/>
+                    <line x1="60" y1="-20" x2="90" y2="320" stroke-width="10"/><line x1="160" y1="-20" x2="190" y2="320" stroke-width="14"/><line x1="255" y1="-20" x2="285" y2="320" stroke-width="10"/>
+                    <line x1="-20" y1="110" x2="320" y2="70" stroke-width="4"/><line x1="-20" y1="210" x2="320" y2="170" stroke-width="4"/><line x1="110" y1="-20" x2="140" y2="320" stroke-width="4"/><line x1="210" y1="-20" x2="240" y2="320" stroke-width="4"/>
+                    <line x1="-20" y1="320" x2="320" y2="-20" stroke-width="7"/>
+                  </svg>
+                  <span class="pt t" style="left:22%;top:18%;--i:0">1</span>
+                  <span class="pt t" style="left:55%;top:14%;--i:1">3</span>
+                  <span class="pt m" style="left:86%;top:11%;--i:2">9</span>
+                  <span class="pt t" style="left:25%;top:51%;--i:3">3</span>
+                  <span class="pt t" style="left:60%;top:45%;--i:4">2</span>
+                  <span class="pt m" style="left:89%;top:42%;--i:5">7</span>
+                  <span class="pt" style="left:29%;top:85%;--i:6">16</span>
+                  <span class="pt" style="left:62%;top:80%;--i:7">15</span>
+                  <span class="pt m" style="left:91%;top:76%;--i:8">9</span>
+                  <span class="pin" style="left:44%;top:63%"><i></i><span>你的店</span></span>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:20px">
+                  <p class="c-big">9 个路口里，<b>4</b>个排进前 3</p>
+                  <div class="legend"><span><i class="t"></i>前 3 名</span><span><i class="m"></i>第 4 到 10 名</span><span><i class="o"></i>10 名以后</span></div>
+                  <p class="c-note">圆圈里是在那个路口搜「soup dumplings」的名次</p>
+                </div>
+              </div>
+            </div></article>
+            <article class="card" id="card-4" role="tabpanel" aria-labelledby="ti-4"><div class="card__in">
+              <div class="card__h"><h3>哪些平台上没有你</h3><span>示例</span></div>
+              <div style="display:flex;flex-direction:column;gap:12px"><p class="c-big">30 个平台里，<b>8</b>个对手有、你没有</p>
+              <p class="c-lg"><span class="ok"><i></i>有你</span><span class="no"><i></i>没有你，对手有</span></p></div>
+              <div class="p-grid" id="pgrid"></div>
+            </div></article>
+          </div>
+        </div>
+      </section>
+
+      <section class="cta">
+        <h2>看看 AI 会不会推荐你的店</h2>
+        <p>免费，约 1 分钟，不改你的任何资料。</p>
+        <button type="button" class="btn" id="ctaBtn">查我的店<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 7l5 5-5 5"/></svg></button>
+      </section>
+      <footer class="foot"><span>GEO Check</span><span>只替你问 AI，不改你的任何资料。</span></footer>
+    </div>
+  </section>
+
+  <!-- 报告页。加载中和加载完是同一页：每一块（data-ld）先盖骨架，数据到了原地换成内容。
+       每一屏里的图是 static/story.js 按 data/<店>/result.json 画出来的，这里只放结构。 -->
+  <section class="view" id="v-report" hidden>
+    <div class="rp" id="rp">
+      <!-- 封面：先让老板看见自己的店。左边店名和客人常提的菜，右边一张大照片 + 三张小照片 -->
+      <header class="cv" id="r-cover">
+        <div class="wrap">
+          <div class="cv__l">
+            <p class="rp-k"><i class="rp-spin" aria-hidden="true"></i><span id="rK">AI 曝光报告</span><span id="rWhen" aria-live="polite"></span></p>
+            <h1 class="ty" id="rName"></h1>
+            <p class="cv__addr" id="rMeta" data-ld="store" data-skb="text"></p>
+            <div class="cv__say" id="rSay" data-ld="rev"></div>
+          </div>
+          <figure class="cv__r">
+            <button type="button" class="rp-ph big" data-ld="photo" data-skb aria-label="放大看第 1 张照片"><img alt=""></button>
+            <p class="cv__badge glass" id="rBadge" data-ld="store" data-skb></p>
+            <div class="cv__th">
+              <button type="button" class="rp-ph" data-ld="photo" data-skb aria-label="放大看第 2 张照片"><img alt=""></button>
+              <button type="button" class="rp-ph" data-ld="photo" data-skb aria-label="放大看第 3 张照片"><img alt=""></button>
+              <button type="button" class="rp-ph" data-ld="photo" data-skb aria-label="放大看第 4 张照片"><img alt=""></button>
+            </div>
+            <figcaption><img class="pi" data-pf="google" alt="">照片来自你的 Google 店铺和客人的评价</figcaption>
+          </figure>
+        </div>
+        <a class="cv__down glass" href="#r-score" data-goto>往下看，AI 怎么说你<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v13M7 13l5 5 5-5"/></svg></a>
+      </header>
+
+      <section class="scn scn--deep" id="r-score" data-ld="score" data-rail="得分">
+        <div class="wrap">
+          <div class="scn__h"><p class="scn__k"><b>1</b>你的得分</p><h2 class="ty" id="hScore"></h2></div>
+          <div class="sc" id="sc"></div>
+          <div class="vit" id="vit"></div>
+        </div>
+      </section>
+
+      <section class="scn scn--sand" id="r-ai" data-ld="ai" data-rail="AI 怎么说">
+        <div class="wrap">
+          <div class="scn__h"><p class="scn__k"><b>2</b>客人问 AI，AI 怎么说</p><h2 class="ty" id="hAi"></h2><p class="scn__lead" id="lAi"></p></div>
+          <div class="qa" id="qa"></div>
+          <div class="rank rise" id="rank" data-io></div>
+        </div>
+      </section>
+
+      <section class="scn" id="r-src" data-ld="ai" data-rail="AI 看哪里">
+        <div class="wrap">
+          <div class="scn__h"><p class="scn__k"><b>3</b>AI 回答之前，先看哪些网站</p><h2 class="ty" id="hSrc"></h2><p class="scn__lead" id="lSrc"></p></div>
+          <div class="src" id="src"></div>
+          <p class="take rise d2" id="tSrc"></p>
+          <div class="fold" id="sitesFold"><button type="button" class="fold__b" aria-expanded="false"><span></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button><div class="fold__c"><div><ul class="sites" id="sites"></ul></div></div></div>
+        </div>
+      </section>
+
+      <section class="scn scn--peach" id="r-map" data-ld="map" data-rail="地图">
+        <div class="wrap">
+          <div class="scn__h"><p class="scn__k"><b>4</b>附近的人，在地图上搜不搜得到你</p><h2 class="ty" id="hMap"></h2><p class="scn__lead" id="lMap"></p></div>
+          <div class="rp-mapw">
+            <div class="rp-map" id="rmap"></div>
+            <div class="rp-mside rise">
+              <div class="rp-cell" id="rcell" aria-live="polite"></div>
+              <p class="rp-legend"><span><i class="t"></i>前 3 名</span><span><i class="m"></i>第 4–10 名</span><span><i class="o"></i>10 名以后</span></p>
+              <p class="note">点地图上的圆圈，看那个路口的前 3 名。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="scn" id="r-pf" data-ld="pf" data-rail="平台">
+        <div class="wrap">
+          <div class="scn__h"><p class="scn__k"><b>5</b>该开的平台，开了没有</p><h2 class="ty" id="hPf"></h2><p class="scn__lead" id="lPf"></p></div>
+          <div class="rp-ratio" id="ratio" aria-hidden="true"></div>
+          <div class="rp-pfbar"><div class="seg" id="pfseg"><span class="thumb"></span></div></div>
+          <div class="rp-chips" id="chips"></div>
+          <!-- 资料核对：各平台上的电话、地址（以后还有营业时间）和 Google 上一不一样 -->
+          <div class="nap rise" id="nap"></div>
+        </div>
+      </section>
+
+      <section class="scn scn--honey" id="r-rep" data-ld="rev" data-rail="口碑">
+        <div class="wrap">
+          <div class="scn__h"><p class="scn__k"><b>6</b>你的口碑，和常被推荐的店比</p><h2 class="ty" id="hRep"></h2><p class="scn__lead" id="lRep"></p></div>
+          <div class="rep" id="rep"></div>
+        </div>
+      </section>
+
+      <section class="scn" id="r-next" data-ld="score" data-rail="下一步">
+        <div class="wrap">
+          <div class="scn__h"><p class="scn__k"><b>7</b>总结和下一步</p><h2 class="ty" id="hSum"></h2></div>
+          <div class="rp-sum" id="sum"></div>
+        </div>
+      </section>
+
+      <section class="scn scn--deep" id="r-plan" data-ld="score">
+        <div class="wrap">
+          <div class="scn__h"><p class="scn__k">先做这几件事</p><h2 class="ty" id="hNext"></h2><p class="scn__lead">勾一件你打算做的事，看左边的分数怎么变。点开看为什么、怎么做。</p></div>
+          <div class="rp-plan">
+            <div class="rp-proj rise"><p>做完以后，预计得分</p><b id="projN"></b><div class="rp-pbar"><i class="base" id="projBase"></i><i class="gain" id="projBar"></i></div><p class="from" id="projFrom"></p><p class="note">加分是按各项得分估算的，不是保证。</p></div>
+            <div class="rp-acts" id="acts"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 联系我们：这一版先留好位置。正式版把名字、logo、二维码、Instagram 填进来 -->
+      <section class="scn scn--orange" id="r-contact" data-ld="score">
+        <div class="wrap">
+          <div class="ct">
+            <div>
+              <h2>这些事，我们可以帮你一起做。</h2>
+              <p>15 分钟，讲清楚你的店先改哪里、怎么改。</p>
+              <div class="ct__go"><button type="button" class="btn" id="rCta">预约免费咨询<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 7l5 5-5 5"/></svg></button><button type="button" class="ct__alt" id="rAgain">再查一家店</button></div>
+            </div>
+            <div class="ct__card">
+              <div class="ct__qr">二维码<br>放这里</div>
+              <ul>
+                <li><i></i><b>公司名和 logo</b></li>
+                <li><img class="pi" data-pf="instagram" alt="">@你的 Instagram</li>
+                <li><i></i>电话或邮箱</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+      <div class="wrap rp-foot"><span>GEO Check</span><span>只替你问 AI，不改你的任何资料。</span></div>
+    </div>
+  </section>
+</main>
+
+<div class="rp-tip" id="rpTip" role="tooltip"></div>
+<!-- 照片放大层：放在最外层，不受页面切换动画影响 -->
+<div class="lb" id="lb" role="dialog" aria-modal="true" aria-label="餐厅照片" hidden>
+  <button type="button" class="lb__x" data-lb="x" aria-label="关闭"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  <button type="button" data-lb="-1" aria-label="上一张"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+  <figure><img id="lbImg" alt=""><figcaption id="lbN"></figcaption></figure>
+  <button type="button" data-lb="1" aria-label="下一张"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></button>
+</div>
+
+<noscript><p style="padding:24px;text-align:center">这一页要打开 JavaScript 才能用。</p></noscript>
 <script src="/static/copy.js" defer></script>
 <script src="/static/story.js" defer></script>
 </body>

@@ -1,467 +1,606 @@
-/* GEO Check · 自动往下播的一页。原生 JS，不引库。
-   数据每 1.5 秒读一次 /api/result；每一段（scene）数据到了才出场，出场时自己演一遍，再滚到下一段。
-   第六轮（2026-11-21 夜）：真地图底图、问 AI 去掉格子、分数改成「你哪里丢分」的诊断、加一段讲清道理、中英文切换。
-   ?static=1：所有段直接显示最终状态（截图、检查用）。?fast=1：动画加速 20 倍（检查用）。?lang=en|zh：指定语言。 */
-(function () {
-  'use strict';
-  var $ = function (id) { return document.getElementById(id); };
-  var QS = location.search, STILL = /[?&]static=1/.test(QS), RM = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  var K = STILL ? 0 : /[?&]fast=1/.test(QS) ? 0.05 : RM ? 0.6 : 1;
-  var DEMO = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && /[?&]demo=1/.test(QS);
-  var ENG = [['chatgpt_web', 'ChatGPT', 'chatgpt'], ['google_aimode', 'Google AI', 'google']];
-  var S = { key: null, url: '', pick: null, d: null, timer: null, token: 0, auto: true, busy: false, fail: null, tried: [] };
-  var LANG = (/[?&]lang=(en|zh)/.exec(QS) || [])[1] || (function () { try { return localStorage.getItem('geo_lang'); } catch (e) { return null; } })() || 'zh';
-  var T = window.COPY[LANG] || window.COPY.zh;
-  window.__story = { played: [], done: false };
+/* GEO Check 页面逻辑。
+   两个页面：首页（#v-home）和报告（#v-report）。加载过程就在报告页上演，不是单独一页。
+   数据怎么来（和旧版一样）：
+     POST /api/check {url}      → {key} 或 {error}
+     GET  /api/result?key=<店>  → 那家店的 result.json；status 不是 done 就每 1.5 秒再读一次
+     GET  /api/tile?z=&x=&y=    → 地图底图
+   网址：/#k=<店>  直接打开那家店的报告；加 ?static 跳过加载动画。 */
+(() => {
+'use strict';
+const $ = s => document.querySelector(s), $$ = (s, r) => [...(r || document).querySelectorAll(s)];
+const RM = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const ic = k => '/static/assets/pf/' + k + '.png';
+const EX_KEY = 'baonoodlehouse.com';
+const STATIC = /[?&]static\b/.test(location.search);
+let view = '';
+const api = (path, body) => fetch(path, body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : undefined).then(r => r.json());
 
-  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
-  function t(k, v) { return String(T[k] == null ? k : T[k]).replace(/\{(\w+)\}/g, function (_, n) { return v && v[n] != null ? esc(v[n]) : ''; }); }
-  function nfmt(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
-  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms * K); }); }
-  function until(fn, tok) { return new Promise(function (r) { (function loop() { if (tok !== S.token || fn()) return r(); setTimeout(loop, 300); })(); }); }
-  function pic(k, cls) { return '<img class="pi ' + (cls || '') + '" src="/static/assets/pf/' + k + '.png" alt="" width="64" height="64">'; }
-  function nm(s) { s = String(s == null ? '' : s).replace(' 地图', ''); if (LANG === 'en' && s === '小红书') return 'Xiaohongshu'; return LANG === 'en' ? (s.replace(/[㐀-鿿]+/g, '').replace(/\s+/g, ' ').trim() || s) : s; }  // 英文版里去掉名字后面的中文
-  function api(path, body) {
-    return fetch(path, body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : undefined).then(function (r) { return r.json(); });
-  }
-  var GLYPH = {
-    ai: '<path d="M4 6h16v9H9l-4 3.5V15H4z"/>', map: '<path d="M12 21s6-5.6 6-10.5a6 6 0 0 0-12 0C6 15.4 12 21 12 21z"/><circle cx="12" cy="10.5" r="2.2"/>',
-    platforms: '<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>',
-    media: '<path d="M5 5h11v14H7a2 2 0 0 1-2-2z"/><path d="M16 9h3v8a2 2 0 0 1-2 2M8 9h5M8 12.5h5M8 16h3"/>',
-    consistency: '<path d="M4 8h10M4 12h16M4 16h7"/><path d="m15 15 2 2 3.5-4"/>', reputation: '<path d="m12 4 2.5 5.2 5.7.8-4.1 4 1 5.6L12 17l-5.1 2.6 1-5.6-4.1-4 5.7-.8z"/>',
-    website: '<circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c2.6 2.4 2.6 13.6 0 16M12 4c-2.6 2.4-2.6 13.6 0 16"/>',
-    right: '<path d="M5 12h13M13 7l5 5-5 5"/>', phone: '<path d="M8 4 5.5 4.8c-.8.3-1.3 1.1-1.1 2 1 6 6.8 11.8 12.8 12.8.9.2 1.7-.3 2-1.1L20 16l-4-2.3-1.9 1.9c-2.1-1-3.8-2.7-4.8-4.8l1.9-1.9z"/>',
-    ok: '<path d="M4 12.5 9 17 20 6.5"/>'
-  };
-  function glyph(k) { return '<svg class="g" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' + (GLYPH[k] || '') + '</svg>'; }
-  function mark(k) { return '<svg class="mk" viewBox="0 0 12 12" aria-hidden="true"><path d="' + (k === 'ok' ? 'M2 6.5 5 9.5 10 3' : 'M3 3l6 6M9 3l-6 6') + '" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'; }
-  function chip(r) { return '<span class="chip">' + pic(r.icon || r.key) + esc(pname(r)) + '</span>'; }
-  function pname(r) { if (r.key === 'cat_infatuation' || r.key === 'cat_eater') { var c = ((S.d.platforms || {}).category) || {}; return (r.key === 'cat_eater' ? 'Eater' : 'The Infatuation') + (LANG === 'en' ? ' best ' + (c.kw || '') + ' list' : ' ' + (c.zh || '') + '榜单'); } return nm(r.name); }
+/* =====================================================================
+   首页
+   ===================================================================== */
+/* ---------- 分段控件 ---------- */
+function segSet(seg, val, key){
+  const btns = [...seg.querySelectorAll('button')];
+  btns.forEach(b => b.setAttribute('aria-pressed', String(b.dataset[key] === val)));
+  const on = btns.find(b => b.dataset[key] === val), th = seg.querySelector('.thumb');
+  if (on && th){ if (getComputedStyle(seg).flexDirection === 'column'){ th.style.height = on.offsetHeight + 'px'; th.style.transform = 'translateY(' + on.offsetTop + 'px)'; } else { th.style.height = ''; th.style.width = on.offsetWidth + 'px'; th.style.transform = 'translateX(' + on.offsetLeft + 'px)'; } }
+}
 
-  // ---------- 读数据 ----------
-  function qs() { return ((S.d && S.d.questions) || []).slice(0, 8); }
-  function runs(q, e) { return ((q.engines || {})[e]) || []; }
-  function okRuns(q, e) { return runs(q, e).filter(function (r) { return r.status === 'ok'; }); }
-  function hits(q, e) { return okRuns(q, e).filter(function (r) { return r['class'] === 'recommend'; }).length; }
-  function quickDone() { var s = S.d && S.d.status; return s === 'quick_done' || s === 'full_running' || s === 'done'; }
-  function back() { var n = 0; qs().forEach(function (q) { ENG.forEach(function (e) { if (runs(q, e[0]).length) n++; }); }); return n; }
-  function qReady(q) { return ENG.every(function (e) { return runs(q, e[0]).length; }) || quickDone(); }
-  function engState(q, e) { var all = runs(q, e); if (!all.length) return quickDone() ? 'none' : 'wait'; var ok = okRuns(q, e); if (!ok.length) return 'none'; return hits(q, e) ? 'yes' : 'no'; }
-  function pfAll() { return (((S.d || {}).platforms || {}).rows || []).filter(function (r) { return !r.error; }); }
-  function pfRows() { return pfAll().filter(function (r) { return r.kind !== 'pos' && r.kind !== 'bonus'; }); }  // 点餐系统只显示找到的那家，不算进「几个里有几个」
-  function pfReady() { return pfAll().some(function (r) { return r.kind; }); }
-  function street() { return String(((S.d || {}).store || {}).address || '').split(',')[0].trim(); }
-
-  // ---------- 入口 ----------
-  function entry() {
-    var d = S.d || {}, h = '<section class="entry"><div class="entry__main"><h1>' + phrases(t('entry_h1')) + '</h1>';
-    if (d.status === 'choose') {
-      h += '<p class="lead">' + t('entry_choose', { n: (d.candidates || []).length }) + '</p><div class="branches">' + (d.candidates || []).map(function (c) {
-        return '<button type="button" data-pick="' + c.i + '"><b>' + esc(c.name) + '</b><span>' + esc(c.address || '') + '</span></button>'; }).join('') + '</div>';
-    } else if (S.busy) {
-      h += '<div class="finding" role="status"><p>' + t('entry_finding') + '</p><div class="bar"><i></i></div></div>';
-    } else {
-      h += '<p class="lead">' + t('entry_lead') + '</p><form class="ask-form" id="f" novalidate><input id="url" type="text" autocapitalize="off" spellcheck="false" placeholder="' + t('entry_ph') + '" aria-label="' + t('entry_ph') + '" value="' + esc(S.url) + '"><button class="btn" type="submit">' + t('entry_btn') + glyph('right') + '</button></form>';
-      if (S.fail) h += '<p class="warn" role="alert">' + esc(S.fail) + '</p>';
-      h += '<p class="srcs"><span>' + t('entry_srcs') + '</span>' + ['google', 'yelp', 'tripadvisor', 'ubereats', 'doordash', 'eater', 'instagram', 'chatgpt'].map(function (k) { return pic(k); }).join('') + '</p>';
-      if (DEMO && S.tried.length) h += '<p class="tried">' + S.tried.map(function (x) { return '<button type="button" class="link" data-key="' + esc(x.key) + '">' + esc(x.name || x.key) + '</button>'; }).join('') + '</p>';
-    }
-    h += '</div><div class="demo" aria-hidden="true"><p class="demo__q">' + t('demo_q') + '</p><p class="demo__who">' + pic('chatgpt') + t('demo_who') + '</p><ol><li>Shanghai 21</li><li class="is-you">' + t('demo_you') + '</li><li>Joe’s Shanghai</li></ol></div></section>';
-    $('stage').innerHTML = h; $('rail').hidden = true; chrome(); fixOrphans($('stage'));
-  }
-  function phrases(s) { return String(s).split('|').map(function (x) { return '<span class="nw">' + x + '</span>'; }).join(LANG === 'en' ? ' ' : ''); }  // 标题按词组断行：「好吃」不会被拆开
-  function fixOrphans(root) {  // 中文段落最后一行不许只剩一两个字：把段尾 6 个字绑在一起
-    if (LANG !== 'zh') return;
-    [].forEach.call(root.querySelectorAll('h2, h3, p, .pipe__n > span:last-child'), function (el) {
-      var n = el.lastChild; if (!n || n.nodeType !== 3 || el.closest('.en, .quote')) return; var tx = n.nodeValue; if (tx.length < 9 || !/[\u3400-\u9fff]/.test(tx)) return;
-      var sp = document.createElement('span'); sp.className = 'nw'; sp.textContent = tx.slice(-6); n.nodeValue = tx.slice(0, -6); el.appendChild(sp);
-    });
-  }
-  function chrome() { $('lang').textContent = T.lang_other; $('resume').textContent = T.auto_resume; $('foot').textContent = T.foot; document.documentElement.lang = LANG === 'en' ? 'en' : 'zh-CN'; }
-  function start(url, pick, force) {
-    S.token++; S.url = url; S.pick = pick || null; S.fail = null; S.busy = true; S.d = null; S.key = null; entry();
-    api('/api/check', { url: url, pick: S.pick, force: !!force, mode: 'full', upgrade: true }).then(function (j) {
-      if (j.error) { S.busy = false; S.fail = j.error; return entry(); }
-      S.key = j.key; watch();
-    }).catch(function () { S.busy = false; S.fail = t('entry_fail'); entry(); });
-  }
-  function watch() {
-    clearInterval(S.timer); var started = false;
-    function tick() {
-      if (!S.key) return;
-      api('/api/result?key=' + encodeURIComponent(S.key)).then(function (d) {
-        if (d.error && !d.status) return;
-        S.d = d; var st = d.status; if (started) lateFill(true);
-        if (st === 'done' || st === 'error' || st === 'choose' || st === 'not_found') { clearInterval(S.timer); S.timer = null; }
-        if (st === 'choose') { S.busy = false; return entry(); }
-        if (st === 'not_found' || st === 'error') { S.busy = false; S.fail = t('entry_notfound'); S.key = null; return entry(); }
-        if (d.store && !started) { started = true; S.busy = false; history.replaceState(null, '', location.pathname + location.search + '#k=' + encodeURIComponent(S.key)); play(); }
-      }).catch(function () {});
-    }
-    tick(); S.timer = setInterval(tick, 1500);
-  }
-
-  // ---------- 小工具：出场、数数、打字、位移 ----------
-  function sec(id, k, h, sub, body) {
-    return '<section class="scene" id="sc-' + id + '" data-scene="' + id + '">' + (k ? '<p class="scene__k" data-r>' + k + '</p>' : '') + '<h2 data-r>' + h + '</h2>' + (sub ? '<p class="scene__sub" data-r>' + sub + '</p>' : '') + body + '</section>';
-  }
-  function reveal(el, sel, gap) {
-    var list = [].slice.call(el.querySelectorAll(sel)), p = Promise.resolve();
-    list.forEach(function (x) { p = p.then(function () { x.classList.add('in'); return sleep(gap); }); });
-    return p;
-  }
-  function countUp(node, to, ms) {
-    if (!node) return Promise.resolve(); if (!K) { node.textContent = nfmt(to); return Promise.resolve(); }
-    return new Promise(function (res) { var t0 = performance.now(), dur = ms * K; (function f(now) { var p = Math.min(1, (now - t0) / dur); node.textContent = nfmt(Math.round(to * (1 - Math.pow(1 - p, 3)))); if (p < 1) requestAnimationFrame(f); else res(); })(t0); });
-  }
-  function typeInto(node, text) {  // 字先全部排好占住位置，再一个一个显出来：气泡不会一边打字一边变大
-    if (!K) { node.textContent = text; return Promise.resolve(); }
-    node.innerHTML = text.split('').map(function (ch) { return '<span class="ch">' + esc(ch) + '</span>'; }).join('');
-    var p = Promise.resolve();
-    [].forEach.call(node.children, function (c) { p = p.then(function () { c.classList.add('in'); return sleep(24); }); });
-    return p;
-  }
-  function pipeTo(line, p) {  // 连线和光点只动 transform
-    var v = line.offsetHeight > line.offsetWidth, len = v ? line.offsetHeight : line.offsetWidth;
-    line.querySelector('i').style.transform = v ? 'scaleY(' + p + ')' : 'scaleX(' + p + ')';
-    line.querySelector('b').style.transform = v ? 'translateY(' + (p * len) + 'px)' : 'translateX(' + (p * len) + 'px)';
-  }
-
-  var SCENES = [];
-  // 1 第一屏：直接是店的卡片（反馈：不要「找到了，这是你的店」这种标题），卡片下半是分数，数据到了再填
-  function scoreReady() { return quickDone() && (S.d.score || {}).total != null && (pfReady() || S.d.status === 'done'); }
-  function ring(total, cls) {
-    var R = 54, C = 2 * Math.PI * R;
-    return '<div class="gauge ' + (cls || '') + '"><svg viewBox="0 0 140 140" aria-hidden="true"><circle class="g0" cx="70" cy="70" r="' + R + '"/><circle class="g1" cx="70" cy="70" r="' + R + '" stroke-dasharray="' + C.toFixed(1) + '" style="--off:' + (C * (1 - total / 100)).toFixed(1) + ';--full:' + C.toFixed(1) + '"/></svg><p><b class="num" data-to="' + total + '">0</b><span>' + t('s7_of') + '</span></p></div>';
-  }
-  function heroScore() {
-    var sc = S.d.score, band = sc.total < 50 ? 'low' : sc.total < 76 ? 'mid' : 'high', bad = problems().filter(function (p) { return !p.ok; });
-    var h = ring(sc.total) + '<div class="hero__st"><p class="hero__lab">' + t('hero_score') + '<em class="band band--' + band + '">' + t('s7_band_' + band) + '</em></p>';
-    if (bad.length) h += '<p class="lowest">' + t('s7_low_lab') + bad.slice(0, 2).map(function (p) { return '<span class="nw">' + p.title + '</span>'; }).join('') + '</p>';
-    return h + '<a class="link" href="#sc-score">' + t('hero_more') + '</a></div>';
-  }
-  function lateFill(animate) {  // 分数和「AI 推荐了谁」要等回答回来：到了就填进第一屏和第二屏
-    var d = S.d; if (!d || !d.store) return;
-    var h = $('hero-score');
-    var sigH = scoreReady() ? d.score.total + '|' + problems().filter(function (p) { return !p.ok; }).slice(0, 2).map(function (p) { return p.key; }).join() + '|' + LANG : '';
-    if (h && sigH && h.dataset.done !== sigH) {
-      animate = animate && !h.dataset.done; h.dataset.done = sigH; h.className = 'hero__score is-ready'; h.innerHTML = heroScore(); var g = h.querySelector('.gauge'), n = h.querySelector('.num');
-      if (animate && K) { setTimeout(function () { g.classList.add('run'); countUp(n, d.score.total, 1300); }, 60); } else { g.classList.add('run'); n.textContent = d.score.total; }
-    }
-    var w = $('why-data');
-    var sigW = quickDone() && (d.overall || {}).asked ? [d.overall.asked, d.overall.listed, d.overall.recommended, ((d.rivals || [])[0] || {}).count, ((d.rivals || [])[0] || {}).name].join('|') : '';
-    if (w && sigW && w.dataset.done !== sigW) {
-      var first = !w.dataset.done; w.dataset.done = sigW; var o = d.overall, top = (d.rivals || [])[0], mine = o.listed != null ? o.listed : (o.recommended || 0), lead = !top || mine >= top.count;
-      w.innerHTML = lead ? t('s8_p3_top', { r: mine }) : t('s8_p3', { name: nm(top.google_name || top.name), c: top.count, r: mine, a: o.asked, miss: Math.max(0, o.asked - mine) });
-      var v = $('why-viz');
-      if (v && top) { var max = Math.max(top.count, mine, 1); v.innerHTML = '<div class="why__col"><i style="--h:' + Math.round(top.count / max * 100) + '%"></i><b class="num">' + top.count + '</b><span class="en">' + esc(nm(top.google_name || top.name)) + '</span><em>' + t('s8_them') + '</em></div><div class="why__col is-you"><i style="--h:' + Math.max(2, Math.round(mine / max * 100)) + '%"></i><b class="num">' + mine + '</b><span class="en">' + esc(nm(d.store.name)) + '</span><em>' + t('s8_you') + '</em></div>'; v.classList.remove('is-wait'); if (animate && K && first) { v.classList.remove('run'); setTimeout(function () { v.classList.add('run'); }, 60); } else v.classList.add('run'); }
-      fixOrphans(w.parentNode);
-    }
-    var pn = $('pipe-asked'); if (pn && (d.overall || {}).asked && pn.dataset.to !== String(d.overall.asked) && pn.closest('.pipe__n').classList.contains('in')) { pn.dataset.to = d.overall.asked; pn.textContent = nfmt(d.overall.asked); var ds = pn.parentNode.querySelector('span:last-child'); if (ds) { ds.innerHTML = t('s2_d4', { n: nfmt(d.overall.asked), street: street() }); fixOrphans(pn.parentNode.parentNode); } }
-    var sig = [(d.overall || {}).asked, (d.overall || {}).recommended, (d.score || {}).total, pfRows().filter(function (r) { return r.found; }).length, (d.rival_platforms || {}).name, LANG].join('|');
-    ['result', 'wall', 'score', 'next'].forEach(function (id) {  // 已经放完的段：数据又变了（后台还在补问），原地换成新数字
-      var el = document.getElementById('sc-' + id), sc = SCENES.filter(function (x) { return x.id === id; })[0];
-      if (!el || window.__story.played.indexOf(id) < 0) return; if (!el.dataset.sig) { el.dataset.sig = sig; return; } if (el.dataset.sig === sig) return;
-      el.insertAdjacentHTML('afterend', sc.html()); var nu = el.nextElementSibling; el.remove(); nu.dataset.sig = sig; fixOrphans(nu); settle(nu, sc);
-    });
-  }
-  SCENES.push({ id: 'store', ready: function () { return !!S.d.store; }, html: function () {
-    var d = S.d, s = d.store, p = d.portrait || {}, dishes = (p.dishes || []).slice(0, 3), qt = (p.quotes || [])[0], thumbs = (p.photos || []).slice(0, 3);
-    var b = '<div class="store" data-r>';
-    if (p.photo) {
-      b += '<figure class="store__photo"><img class="store__main" src="' + esc(p.photo) + '" alt="" referrerpolicy="no-referrer" data-img>';
-      if (thumbs.length === 3) b += '<div class="thumbs">' + thumbs.map(function (u) { return '<img src="' + esc(u) + '" alt="" loading="lazy" referrerpolicy="no-referrer" data-img>'; }).join('') + '</div>';
-      b += '<figcaption>' + pic('google') + t('s1_photo') + '</figcaption></figure>';
-    }
-    b += '<div class="store__body"><h2 class="store__name">' + esc(s.name) + '</h2><p class="store__addr">' + esc(s.address || '') + '</p>';
-    if (s.rating) b += '<p class="store__g">' + pic('google') + t('s1_rating', { r: s.rating, n: nfmt(s.review_count || 0) }) + '</p>';
-    if (dishes.length) b += '<p class="store__lab">' + pic('google') + t('s1_dishes') + '</p><ul class="chips">' + dishes.map(function (x) {
-      var zh = LANG === 'zh' && x.zh; return '<li>' + (zh ? '<b>' + esc(x.zh) + '</b><span class="en">' + esc(x.name) + '</span>' : '<b class="en">' + esc(x.name) + '</b>') + '<i>' + t('s1_mentions', { n: x.mentions }) + '</i></li>'; }).join('') + '</ul>';
-    if (qt) b += '<blockquote class="quote"><p class="en">“' + esc(qt.text) + '”</p>' + (qt.zh && LANG === 'zh' ? '<p>' + esc(qt.zh) + '</p>' : '') + '</blockquote>';
-    b += '</div><div class="hero__score" id="hero-score"><div class="go"><div class="go__bar"><i></i></div><span>' + t('s1_go') + '</span><button type="button" class="link" data-act="notme">' + t('s1_notme') + '</button></div></div></div>';
-    var others = (d.candidates || []).filter(function (c) { return c.i !== d.picked; });
-    if ((d.candidates || []).length > 1 && others.length) b += '<p class="aside" data-r>' + t('s1_branches') + others.map(function (c) { return '<button type="button" class="link" data-pick="' + c.i + '">' + esc(c.name) + '</button>'; }).join(' ') + '</p>';
-    return '<section class="scene scene--hero" id="sc-store" data-scene="store">' + b + '</section>';
-  }, play: function (el) { return reveal(el, '[data-r]', 220).then(function () { var g = el.querySelector('.go'); if (g) g.classList.add('run'); return sleep(3200); }); } });
-
-  // 2 为什么要管这件事（反馈：这段有说服力，提到前面，用一段话加一张图告诉老板 AI 真的在影响生意）。道理先讲，这家店的数字等回答回来再填
-  SCENES.push({ id: 'why', ready: function () { return !!S.d.store; }, html: function () {
-    var b = '<div class="why" data-r><div class="why__txt"><p>' + t('s8_p1') + '</p><p class="why__big">' + t('s8_p2') + '</p><p id="why-data" class="why__data"></p><p class="why__geo">' + t('s8_p4') + '</p></div><div class="why__viz is-wait" id="why-viz" aria-hidden="true"><p class="why__wait"><span class="pulse"></span>' + t('s8_wait') + '</p></div></div>';
-    return sec('why', '', t('s8_h'), '', b);
-  }, play: function (el) { return reveal(el, '[data-r]', 220).then(function () { return sleep(3000); }); } });
-
-  // 2 我们替你跑了四个地方
-  SCENES.push({ id: 'pipe', ready: function () { return qs().length > 0; }, html: function () {
-    var d = S.d, asked = (d.overall || {}).asked || (d.plan || {}).full_total || 32;
-    var n = [d.store.review_count || 0, Math.max(pfRows().length, 26), ((d.grid || {}).cells || []).length || 9, asked];
-    var icons = [pic('google'), pic('yelp') + pic('ubereats') + pic('eater'), glyph('map'), pic('chatgpt') + pic('google')];
-    var b = '<ol class="pipe"><li class="pipe__line" aria-hidden="true"><i></i><b></b></li>' + [1, 2, 3, 4].map(function (i) {
-      return '<li class="pipe__n"><span class="pipe__ic">' + icons[i - 1] + '</span><b class="num"' + (i === 4 ? ' id="pipe-asked"' : '') + ' data-to="' + n[i - 1] + '">·</b><strong>' + t('s2_n' + i) + '</strong><span>' + t('s2_d' + i, { n: nfmt(n[i - 1]), street: street() }) + '</span></li>'; }).join('') + '</ol>';
-    return sec('pipe', '', t('s2_h'), t('s2_sub'), b);
-  }, play: function (el) {
-    var nodes = [].slice.call(el.querySelectorAll('.pipe__n')), line = el.querySelector('.pipe__line');
-    return reveal(el, '[data-r]', 200).then(function () {
-      line.classList.add('run'); var p = Promise.resolve();
-      nodes.forEach(function (n, i) { p = p.then(function () { pipeTo(line, i / 3); n.classList.add('in'); return countUp(n.querySelector('.num'), +n.querySelector('.num').dataset.to, 700).then(function () { return sleep(350); }); }); });
-      return p;
-    });
-  } });
-
-  // 3 站路口：真地图底图（OpenStreetMap / CARTO 的瓦片，服务端存在本机），店和 9 个路口按经纬度落在图上
-  var Z = 15, TILE = 256;  // 15 级：字大、路少，接近手机上看地图的样子
-  function wx(lng) { return (lng + 180) / 360 * Math.pow(2, Z) * TILE; }
-  function wy(lat) { var s = Math.sin(lat * Math.PI / 180); return (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * Math.pow(2, Z) * TILE; }
-  function mapView(g, store) {
-    var xs = g.cells.map(function (c) { return wx(+c.lng); }), ys = g.cells.map(function (c) { return wy(+c.lat); });
-    var x0 = Math.min.apply(null, xs), x1 = Math.max.apply(null, xs), y0 = Math.min.apply(null, ys), y1 = Math.max.apply(null, ys);
-    var V = Math.max(x1 - x0, y1 - y0) * 1.42, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
-    return { V: V, left: cx - V / 2, top: cy - V / 2, sx: wx(+store.lng), sy: wy(+store.lat) };
-  }
-  SCENES.push({ id: 'grid', ready: function () { return !!S.d.grid || quickDone(); }, skip: function () { return !((S.d.grid || {}).cells || []).length; }, html: function () {
-    var g = S.d.grid, st = S.d.store, n = g.cells.length, v = mapView(g, st), pct = function (px) { return (px / v.V * 100).toFixed(3) + '%'; }, tiles = '';
-    for (var tx = Math.floor(v.left / TILE); tx <= Math.floor((v.left + v.V) / TILE); tx++) for (var ty = Math.floor(v.top / TILE); ty <= Math.floor((v.top + v.V) / TILE); ty++)
-      tiles += '<img class="tile" src="/api/tile?z=' + Z + '&x=' + tx + '&y=' + ty + '" alt="" style="left:' + pct(tx * TILE - v.left) + ';top:' + pct(ty * TILE - v.top) + ';width:' + pct(TILE + 0.6) + '">';
-    var pts = g.cells.map(function (c, i) {
-      var cls = !c.rank ? 'r-out' : c.rank <= 3 ? 'r-top' : c.rank <= 10 ? 'r-mid' : 'r-low';
-      return '<span class="pt ' + cls + '" data-i="' + i + '" style="left:' + pct(wx(+c.lng) - v.left) + ';top:' + pct(wy(+c.lat) - v.top) + '">' + (c.rank || '–') + '</span>';
-    }).join('');
-    var used = {}; g.cells.forEach(function (c) { used[!c.rank ? 'r-out' : c.rank <= 3 ? 'r-top' : c.rank <= 10 ? 'r-mid' : 'r-low'] = 1; });
-    var lg = [['r-top', 's3_lg1'], ['r-mid', 's3_lg2'], ['r-low', 's3_lg3'], ['r-out', 's3_lg4']].filter(function (x) { return used[x[0]]; }).map(function (x) { return '<span><i class="' + x[0] + '"></i>' + t(x[1]) + '</span>'; }).join('');
-    var zh = LANG === 'zh' && (((S.d.portrait || {}).dishes || []).filter(function (x) { return String(x.name).toLowerCase() === g.keyword; })[0] || {}).zh;
-    var b = '<div class="map" data-r><div class="map__box"><div class="map__view" role="img" aria-label="' + t('s3_h', { kw: g.keyword, street: street() }) + '">' + tiles + '<span class="walker"></span>' + pts +
-      '<span class="home" style="left:' + pct(v.sx - v.left) + ';top:' + pct(v.sy - v.top) + '"><b>' + t('s3_you') + '</b></span><span class="map__credit">' + t('map_credit') + '</span></div><p class="legend">' + lg + '</p><p class="note">' + t('s3_lg_note') + '</p></div>';
-    b += '<div class="map__side"><p class="map__kw">' + pic('google') + '<span class="en">' + esc(g.keyword) + '</span>' + (zh ? '<span class="map__zh">' + esc(zh) + '</span>' : '') + '</p><div class="map__say" aria-live="polite"><p class="map__at"></p><p class="map__rank"></p><p class="map__first"></p></div>';
-    b += '<p class="map__sum">' + (g.top3_cells ? t('s3_sum', { n: n, t: g.top3_cells }) : t('s3_sum_none', { n: n })) + (g.leader && g.leader[0] !== st.name ? ' ' + t('s3_leader', { name: g.leader[0], c: g.leader[1] }) : '') + '</p><p class="note">' + t('s3_src', { at: g.at || '' }) + '</p></div></div>';
-    return sec('grid', '', t('s3_h', { kw: g.keyword, street: street() }), t('s3_sub', { n: n }), b);
-  }, say: function (el, i, label) {
-    var c = S.d.grid.cells[i], rk = el.querySelector('.map__rank');
-    el.querySelector('.map__at').textContent = label || T.s3_at.replace('{i}', i + 1);
-    rk.textContent = c.rank ? T.s3_rank.replace('{r}', c.rank) : T.s3_out; rk.className = 'map__rank ' + (c.rank && c.rank <= 3 ? 'good' : 'bad');
-    el.querySelector('.map__first').textContent = label ? '' : c.rank === 1 ? T.s3_youfirst : c.top && c.top[0] ? T.s3_first.replace('{name}', c.top[0]) : '';
-  }, near: function () {  // 离店最近的那个路口
-    var g = S.d.grid, st = S.d.store, best = 0, bd = 1e18;
-    g.cells.forEach(function (c, i) { var dd = Math.pow(wx(+c.lng) - wx(+st.lng), 2) + Math.pow(wy(+c.lat) - wy(+st.lat), 2); if (dd < bd) { bd = dd; best = i; } });
-    return best;
-  }, at: function (el, i) { var pt = el.querySelectorAll('.pt')[i], w = el.querySelector('.walker'); w.style.left = pt.style.left; w.style.top = pt.style.top; return w; },
-  play: function (el) {
-    var self = this, pts = [].slice.call(el.querySelectorAll('.pt')), w = el.querySelector('.walker'), view = el.querySelector('.map__view');
-    function go(i) { var a = pts[0].getBoundingClientRect(), b2 = pts[i].getBoundingClientRect(); w.style.transform = 'translate(' + (b2.left - a.left) + 'px,' + (b2.top - a.top) + 'px)'; }
-    w.style.left = pts[0].style.left; w.style.top = pts[0].style.top;
-    return reveal(el, '[data-r]', 200).then(function () {
-      view.classList.add('in'); var p = sleep(500);
-      pts.forEach(function (pt, i) { p = p.then(function () { go(i); w.classList.add('on'); return sleep(i ? 520 : 200); }).then(function () { pt.classList.add('in'); self.say(el, i); return sleep(780); }); });
-      return p.then(function () { var m = self.near(); go(m); self.say(el, m, T.s3_store); el.querySelector('.map__sum').classList.add('in'); el.querySelector('.home').classList.add('in'); return sleep(1200); });
-    });
-  }, still: function (el) { var m = this.near(); this.at(el, m).classList.add('on'); this.say(el, m, T.s3_store); el.querySelector('.map__view').classList.add('in'); } });
-
-  // 4 问 AI（去掉了下面那排格子：下一段会说总数，这里只看一问一答）
-  function listHtml(q, e) {  // 名单永远 5 行：你排在第 5 名以后，就前 3 名 + 一行小点点 + 你那一行；这样 8 个问题来回换，框不会忽大忽小
-    var ok = okRuns(q, e[0]), st = engState(q, e[0]), ROWS = 5, li = [];
-    var h = '<article class="ans ans--' + st + '"><h3>' + pic(e[2]) + e[1] + '</h3>';
-    function row(n, name, cls) { return '<li class="' + (cls || '') + '"><span class="n">' + n + '</span><span class="en">' + esc(name) + '</span></li>'; }
-    if (st === 'wait' || st === 'none') { li.push('<li class="is-note"><span class="n"></span><span>' + t(st === 'wait' ? 's4_wait' : 's4_none') + '</span></li>'); }
-    else {
-      var r = ok.filter(function (x) { return x['class'] === 'recommend'; })[0] || ok[0], pos = r['class'] === 'recommend' ? r.position : null, names = r.names || [];
-      if (pos && pos > ROWS) { names.slice(0, 3).forEach(function (n2, i) { li.push(row(i + 1, n2)); }); li.push('<li class="is-gap" aria-hidden="true"><span class="n"></span><span>···</span></li>'); li.push(row(pos, names[pos - 1] || S.d.store.name, 'is-you')); }
-      else if (pos) names.slice(0, ROWS).forEach(function (n2, i) { li.push(row(i + 1, n2, pos === i + 1 ? 'is-you' : '')); });
-      else { names.slice(0, ROWS - 1).forEach(function (n2, i) { li.push(row(i + 1, n2)); }); li.push('<li class="is-absent"><span class="n"></span><span>' + t('s4_absent') + '</span></li>'); }
-    }
-    while (li.length < ROWS) li.splice(li.length - (st === 'no' ? 1 : 0), 0, '<li class="is-pad" aria-hidden="true"><span class="n"></span><span></span></li>');
-    var v = st === 'yes' ? (function () { var r2 = ok.filter(function (x) { return x['class'] === 'recommend'; })[0]; return r2 && r2.position ? t('s4_yes', { p: r2.position }) : t('s4_yes0'); })() : st === 'no' ? t('s4_no') : '';
-    return h + '<ol class="names">' + li.join('') + '</ol><p class="ans__v">' + (v || '&nbsp;') + '</p></article>';
-  }
-  function qaFrame(i) {
-    var q = qs()[i];
-    return '<div class="qa__ask"><p class="qa__who">' + t('s4_ask') + ' · ' + t('s4_q', { i: i + 1 }) + '</p><p class="bubble en" data-text="' + esc(q.text) + '"></p>' + '<p class="qa__zh">' + (q.text_zh && LANG === 'zh' ? esc(q.text_zh) : '&nbsp;') + '</p>' + '</div><div class="qa__ans">' + ENG.map(function (e) { return listHtml(q, e); }).join('') + '</div>';
-  }
-  function dots(el, i) { [].forEach.call(el.querySelectorAll('.qdot'), function (b, k) { b.className = 'qdot' + (k === i ? ' on' : k < i || el.classList.contains('done') ? ' seen' : ''); }); }
-  function showQ(el, i, animate) {
-    var fr = el.querySelector('.qa__frame'); fr.innerHTML = qaFrame(i); fr.classList.remove('out'); dots(el, i);
-    var bub = fr.querySelector('.bubble'), items = [].slice.call(fr.querySelectorAll('.names li')), vs = [].slice.call(fr.querySelectorAll('.ans__v'));
-    if (!animate) { bub.textContent = bub.dataset.text; items.concat(vs).forEach(function (x) { x.classList.add('in'); }); return Promise.resolve(); }
-    return typeInto(bub, bub.dataset.text).then(function () { return sleep(250); }).then(function () {
-      var p = Promise.resolve(); items.forEach(function (x) { p = p.then(function () { x.classList.add('in'); return sleep(70); }); });
-      return p.then(function () { vs.forEach(function (x) { x.classList.add('in'); }); });
-    });
-  }
-  SCENES.push({ id: 'qa', ready: function () { return qs().length > 0 && qReady(qs()[0]); }, html: function () {
-    var n = qs().length;
-    var b = '<div class="qa" data-r><div class="qa__frame"></div><p class="qdots">' + qs().map(function (q, i) { return '<button type="button" class="qdot" data-qi="' + i + '" aria-label="' + t('s4_q', { i: i + 1 }) + '"></button>'; }).join('') + '</p></div>';
-    return sec('qa', '', t('s4_h'), t((S.d.questions || []).length > n ? 's4_sub_more' : 's4_sub', { n: n, nq: (S.d.questions || []).length }), b);
-  }, play: function (el, tok) {
-    return reveal(el, '[data-r]', 200).then(function () {
-      var p = Promise.resolve(), n = qs().length;
-      qs().forEach(function (q, i) { p = p.then(function () { return until(function () { return qReady(q); }, tok); }).then(function () { return showQ(el, i, true); }).then(function () { return sleep(i === n - 1 ? 1400 : 2300); }).then(function () { if (i < n - 1) { el.querySelector('.qa__frame').classList.add('out'); return sleep(180); } }); });
-      return p.then(function () { el.classList.add('done'); dots(el, n - 1); });
-    });
-  }, still: function (el) { el.classList.add('done'); return showQ(el, 0, false); } });
-
-  // 5 结果和对手
-  SCENES.push({ id: 'result', ready: function () { return quickDone() && (S.d.overall || {}).asked > 0; }, html: function () {
-    var d = S.d, o = d.overall, eg = d.engines || {}, me = d.store, mine = o.listed != null ? o.listed : o.recommended;
-    var b = '<ul class="engs" data-r>' + ENG.map(function (e) { var v = eg[e[0]] || {}; return '<li class="' + (v.recommend ? 'yes' : 'no') + '">' + pic(e[2]) + '<span>' + t('s5_eng', { name: e[1], n: v.n || 0, r: v.recommend || 0 }) + '</span></li>'; }).join('') + '</ul>';
-    var rows = (d.rivals || []).slice(0, 5).map(function (r) { return { nm: r.google_name || r.name, c: r.count, rating: r.rating, rc: r.review_count }; });
-    if (rows.length) {
-      rows.push({ nm: me.name, c: mine, you: true, rating: me.rating, rc: me.review_count }); rows.sort(function (a, b2) { return b2.c - a.c || (a.you ? -1 : 1); });
-      var max = rows[0].c || 1;
-      b += '<h3 data-r>' + t('s5_rivals') + '</h3><ol class="rank">' + rows.map(function (r) { return '<li class="' + (r.you ? 'is-you' : '') + '" data-r><span class="nm"><b class="en">' + esc(nm(r.nm)) + '</b>' + (r.rating ? '<small>' + pic('google') + t('s5_g', { r: r.rating, n: nfmt(r.rc || 0) }) + '</small>' : '') + '</span><span class="bar"><i style="--w:' + Math.max(r.c ? 3 : 0, Math.round(r.c / max * 100)) + '%"></i></span><span class="cnt">' + t('s5_times', { c: r.c }) + '</span></li>'; }).join('') + '</ol>';
-    }
-    var h = t('s5_h', { a: o.asked, r: '\u0001' }).replace('\u0001', '<em class="big num" data-to="' + o.recommended + '">' + o.recommended + '</em>');
-    var nq = (d.questions || []).length, per = o.asked / (nq * ENG.length);
-    return sec('result', '', h, t(per === Math.round(per) && per > 1 ? 's5_sub_even' : 's5_sub', { nq: nq, a: o.asked, per: per }), b);
-  }, play: function (el) { var big = el.querySelector('h2 .big'); if (big) { big.textContent = '0'; setTimeout(function () { countUp(big, +big.dataset.to, 900); }, 250 * K); } return reveal(el, '[data-r]', 110).then(function () { return sleep(900); }); } });
-
-  // 6 平台墙
-  var CLS = [['口碑', 's6_c1'], ['品类', 's6_c7'], ['第三方', 's6_c2'], ['社交', 's6_c3'], ['外卖', 's6_c4'], ['团餐', 's6_c5']];
-  function tile(r, rf) {
-    var bad = r.found && (r.phone_ok === false || r.addr_ok === false), lab = bad ? t(r.phone_ok === false ? 's6_bad_phone' : 's6_bad_addr') : r.found ? (r.rating ? t('s6_stars', { r: r.rating }) : t(r.kind === 'mention' ? 's6_wrote' : 's6_on')) : t(r.kind === 'mention' ? 's6_nowrote' : 's6_off');
-    return '<li class="pf ' + (bad ? 'bad' : r.found ? 'on' : 'off') + '" data-t>' + pic(r.icon || r.key) + '<b>' + esc(pname(r)) + '</b><span class="pf__s">' + mark(bad || !r.found ? 'x' : 'ok') + lab + '</span>' + (!r.found && rf[r.key] ? '<span class="pf__rv">' + t('s6_rv') + '</span>' : '') + '</li>';
-  }
-  SCENES.push({ id: 'wall', ready: function () { return pfReady() || (quickDone() && S.d.status === 'done'); }, skip: function () { return !pfReady(); }, html: function () {
-    var d = S.d, rows = pfRows().concat(pfAll().filter(function (r) { return r.kind === 'bonus' && r.found; })), pos = pfAll().filter(function (r) { return r.kind === 'pos' && r.found; }), rp = d.rival_platforms, rf = (rp || {}).found || {}, a = rows.filter(function (r) { return r.found; }).length;
-    var gap = rows.filter(function (r) { return !r.found && rf[r.key]; });
-    var b = '<div class="vs" data-r><p class="vs__you"><b class="num" data-to="' + a + '">0</b><span>' + t('s6_you_lab') + '</span></p>';
-    if (rp) { var bn = rows.filter(function (r) { return rf[r.key]; }).length + 1; b += '<p class="vs__rv"><b class="num" data-to="' + bn + '">0</b><span>' + t('s6_rival_lab', { name: nm(rp.name) }) + '</span></p>'; }
-    b += '</div>';
-    if (gap.length) b += '<div class="gap" data-r><p>' + t('s6_gap', { n: gap.length, name: nm(rp.name) }) + '</p><div class="gap__ic">' + gap.map(chip).join('') + '</div></div>';
-    b += CLS.map(function (c) {
-      var rs = rows.filter(function (r) { return r['class'] === c[0]; }); if (!rs.length) return '';
-      return '<div class="wall"><p class="wall__h" data-r>' + t(c[1], { zh: ((d.platforms || {}).category || {}).zh, kw: ((d.platforms || {}).category || {}).kw }) + '<span>' + rs.filter(function (r) { return r.found; }).length + ' / ' + rs.length + '</span></p><ul>' + rs.map(function (r) { return tile(r, rf); }).join('') + '</ul></div>';
-    }).join('');
-    if (pos.length) b += '<div class="wall"><p class="wall__h" data-r>' + t('s6_c6') + '</p><ul>' + pos.map(function (r) { return tile(r, {}); }).join('') + '</ul></div>';
-    var dk = {}; rows.forEach(function (r) { if (r.domain && !dk[r.domain.replace(/^guide\./, '')]) dk[r.domain.replace(/^guide\./, '')] = r; });  // 只认上面列出来的平台
-    var six = d.team600;
-    if (six && (six.sites || []).length) {  // 只有同事跑过 600 题的老客户有这块，数字来自同事的文件
-      // 只列我们上面也查过的平台（有它自己的图标，「有没有你」用上面同一次检查的结果，口径一致）
-      var li6 = six.sites.map(function (s) { var r = dk[s.domain] || dk[String(s.domain).replace(/^(ny|www|guide)\./, '')]; if (!r) return ''; return '<li class="' + (r.found ? 'on' : 'off') + '">' + pic(r.key) + '<b>' + esc(nm(r.name)) + '</b><span>' + t('s6_600_n', { c: s.count }) + '</span><em>' + t(r.found ? 's6_600_on' : 's6_600_off') + '</em></li>'; }).filter(Boolean).slice(0, 6).join('');
-      if (li6) b += '<div class="cited cited--600" data-r><p>' + t('s6_600') + '</p><ul>' + li6 + '</ul></div>';
-    } else {
-      var cited = (d.sites || []).filter(function (s) { return s.kind !== 'rival' && s.kind !== 'own'; }).slice(0, 6);
-      var li = cited.map(function (s) { var r = dk[s.domain] || dk[String(s.domain).replace(/^(ny|www)\./, '')]; return r ? '<li>' + pic(r.key) + '<b>' + esc(nm(r.name)) + '</b><span>' + t('s6_cited_n', { c: s.count }) + '</span></li>' : ''; }).join('');
-      if (li) b += '<div class="cited" data-r><p>' + t('s6_cited') + '</p><ul>' + li + '</ul></div>';
-    }
-    b += '<p class="note" data-r>' + t('s6_note') + '</p>';
-    return sec('wall', '', t('s6_h'), t('s6_sub', { n: rows.length }), b);
-  }, play: function (el) {
-    return reveal(el, 'h2[data-r], .scene__sub, .vs', 200).then(function () {
-      [].forEach.call(el.querySelectorAll('.vs .num'), function (n) { countUp(n, +n.dataset.to, 900); });
-      [].forEach.call(el.querySelectorAll('.wall__h, .gap'), function (x) { x.classList.add('in'); });
-      return reveal(el, '[data-t]', 60);
-    }).then(function () { return reveal(el, '.cited, .note', 260); }).then(function () { return sleep(1200); });
-  } });
-
-  // 7 诊断：每一项写成「你的问题是什么」，从丢分最多的排起
-  function problems() {
-    var d = S.d, sc = d.score || {}, rows = pfRows(), out = [];
-    (sc.dims || []).forEach(function (x) {
-      if (x.score == null) return; var f = x.facts || {}, p = { key: x.key, score: x.score, ok: x.score >= 80, title: '', desc: '', chips: '' };
-      if (p.ok) { p.title = t('ok_' + x.key); out.push(p); return; }
-      if (x.key === 'ai') { p.title = t('p_ai_t'); p.desc = t(f.rec ? 'p_ai_d' : 'p_ai0_d', f); }
-      else if (x.key === 'map') { p.title = f.top3 ? t('p_map_t2', { miss: f.n - f.top3, n: f.n }) : t('p_map_t'); p.desc = t('p_map_d', f); }
-      else if (x.key === 'platforms' || x.key === 'media') {
-        var kind = x.key === 'platforms' ? 'page' : 'mention', miss = rows.filter(function (r) { return !r.found && (r.kind || 'page') === kind; });
-        p.title = x.key === 'platforms' ? t('p_platforms_t', { k: miss.length }) : t('p_media_t'); p.desc = x.key === 'platforms' ? t('p_platforms_d') : t('p_media_d', { k: miss.length }); p.chips = miss.map(chip).join(''); p.k = miss.length;
-      } else if (x.key === 'consistency') { p.title = t('p_consistency_t'); p.desc = t('p_consistency_d', { list: (f.bad || []).map(function (b) { return T.w_on.replace('{name}', nm(b.name)).replace('{what}', T['w_' + b.what]); }).join(LANG === 'en' ? ', ' : '、') }); }
-      else if (x.key === 'reputation') { p.title = t(f.reviews < f.med_n ? 'p_reputation_t' : 'p_reputation_rt'); p.desc = t('p_reputation_d', { reviews: nfmt(f.reviews), rating: f.rating, med_n: nfmt(f.med_n) }); }
-      else if (x.key === 'website') { p.title = t('p_website_t'); p.desc = [f.cited ? '' : t('p_website_cited'), f.schema ? '' : t('p_website_schema'), f.opens ? '' : t('p_website_down')].filter(Boolean).join(LANG === 'en' ? ' ' : ''); }
-      if (!p.title) { p.title = esc(x.name); p.desc = esc(x.see); }
-      out.push(p);
-    });
-    out.sort(function (a, b) { return a.score - b.score; });
-    return out;
-  }
-  SCENES.push({ id: 'score', ready: scoreReady, html: function () {
-    var d = S.d, sc = d.score, pv = d.prev_score, ps = problems(), bad = ps.filter(function (p) { return !p.ok; }), good = ps.filter(function (p) { return p.ok; });
-    var band = sc.total < 50 ? 'low' : sc.total < 76 ? 'mid' : 'high';
-    var same = !!(pv && pv.dims) && sc.dims.every(function (x) { return (x.score == null) === (pv.dims[x.key] == null); });
-    var b = '<div class="scorehead"><div data-r class="gwrap">' + ring(sc.total) + '<em class="band band--' + band + '">' + t('s7_band_' + band) + '</em></div><div class="scoretext" data-r>';
-    if (pv && pv.total != null) { var dd = sc.total - pv.total; b += '<p class="delta">' + t(!same ? 's7_prev_diff' : dd > 0 ? 's7_prev_up' : dd < 0 ? 's7_prev_down' : 's7_prev_same', { a: pv.total, b: sc.total, d: Math.abs(dd) }) + '</p>'; }
-    if (bad.length) b += '<p class="lowest">' + t('s7_low_lab') + bad.slice(0, 2).map(function (p) { return '<span class="nw">' + p.title + '</span>'; }).join('') + '</p>';
-    b += '<p>' + t('s7_lead') + '</p></div></div>';
-    b += '<ol class="probs">' + bad.map(function (p, i) {
-      return '<li class="prob ' + (p.score < 50 ? 'low' : 'mid') + '" data-r data-key="' + p.key + '"><span class="prob__n">' + (i + 1) + '</span><span class="prob__ic">' + glyph(p.key) + '</span><div class="prob__m"><h3>' + p.title + '</h3><p>' + p.desc + '</p>' + (p.chips ? '<p class="prob__chips">' + p.chips + '</p>' : '') + '</div><div class="prob__s"><span>' + t('s7_got', { n: p.score }) + '</span><div class="dim__bar"><i style="--w:' + Math.max(3, p.score) + '%"></i></div></div></li>'; }).join('') + '</ol>';
-    if (good.length) b += '<div class="oks" data-r><p>' + t('s7_ok') + '</p><ul>' + good.map(function (p) { return '<li>' + glyph('ok') + p.title + '<span>' + t('s7_got', { n: p.score }) + '</span></li>'; }).join('') + '</ul></div>';
-    if (bad.length) b += '<p class="fixline" data-r>' + t('s7_fix', { k: bad.length }) + '</p>';
-    return sec('score', '', t('s7_h', { n: sc.total }).replace(/(\d+\s*分)/, '<span class="nw">$1</span>'), '', b);
-  }, play: function (el) {
-    return reveal(el, 'h2[data-r], .gwrap', 200).then(function () { el.querySelector('.gauge').classList.add('run'); return countUp(el.querySelector('.gauge .num'), S.d.score.total, 1300); })
-      .then(function () { return reveal(el, '.scoretext, .prob, .oks, .fixline', 160); }).then(function () { return sleep(1200); });
-  } });
-
-  // 9 下一步：前三个问题各对一件事
-  SCENES.push({ id: 'next', ready: scoreReady, html: function () {
-    var g = S.d.grid || {}, rows = pfRows(), acts = problems().filter(function (p) { return !p.ok; }).slice(0, 3).map(function (p) {
-      var ic = '';
-      if (p.key === 'platforms') ic = rows.filter(function (r) { return !r.found && (r.kind || 'page') === 'page'; }).map(chip).join('');
-      else if (p.key === 'media') ic = [['infatuation', 'The Infatuation'], ['eater', 'Eater'], ['timeout', 'Time Out']].map(function (x) { return chip({ key: x[0], name: x[1] }); }).join('');
-      else if (p.key === 'consistency') ic = rows.filter(function (r) { return r.found && (r.phone_ok === false || r.addr_ok === false); }).map(chip).join('');
-      else if (p.key === 'map' || p.key === 'reputation') ic = chip({ key: 'google', name: 'Google' });
-      else if (p.key === 'ai') ic = chip({ key: 'google', name: 'Google' }) + chip({ key: 'yelp', name: 'Yelp' });
-      return { t: t('a_' + p.key + '_t', { k: p.k }), d: t('a_' + p.key + '_d', { kw: g.keyword || '' }), ic: ic };
-    });
-    var b = '<ol class="todo">' + acts.map(function (a, i) { return '<li data-r><span class="todo__n">' + (i + 1) + '</span><div><h3>' + a.t + '</h3><p>' + a.d + '</p>' + (a.ic ? '<p class="todo__ic">' + a.ic + '</p>' : '') + '</div></li>'; }).join('') + '</ol>';
-    b += '<p class="again" data-r><button type="button" class="link" data-act="reset">' + t('again') + '</button><button type="button" class="link" data-act="redo">' + t('redo') + '</button></p>';
-    return sec('next', '', t(acts.length === 1 ? 's9_h1' : acts.length === 2 ? 's9_h2' : 's9_h'), '', b);
-  }, play: function (el) { return reveal(el, '[data-r]', 220); } });
-
-  // ---------- 导演：一段一段放 ----------
-  function rail(cur) {
-    var r = $('rail'); r.hidden = false;
-    r.innerHTML = '<ol>' + SCENES.map(function (s) { var on = !!document.getElementById('sc-' + s.id); return '<li class="' + (s.id === cur ? 'now' : on ? 'done' : '') + '"><a ' + (on ? 'href="#sc-' + s.id + '"' : 'aria-disabled="true"') + '>' + t('nav_' + s.id) + '</a></li>'; }).join('') + '</ol>';
-  }
-  function waitNote(on) {
-    var w = $('waiting'); if (!on) { if (w) w.remove(); return; }
-    var txt = pfReady() || !quickDone() ? t('s4_waiting', { a: back(), b: qs().length * ENG.length || 16 }) : t('s6_waiting');
-    if (!w) { w = document.createElement('p'); w.id = 'waiting'; w.className = 'waiting'; w.setAttribute('role', 'status'); $('stage').appendChild(w); }
-    w.innerHTML = '<span class="pulse"></span>' + txt;
-  }
-  function settle(el, sc) {  // 直接摆成最终状态（静止模式、切换语言时用）
-    [].forEach.call(el.querySelectorAll('[data-r],[data-t],.pipe__n,.pt,.map__sum,.home,.map__view'), function (x) { x.classList.add('in'); });
-    el.classList.add('still', 'done'); [].forEach.call(el.querySelectorAll('.why__viz,.gauge'), function (x) { x.classList.add('run'); });
-    [].forEach.call(el.querySelectorAll('.num[data-to]'), function (n) { n.textContent = nfmt(+n.dataset.to); });
-    return sc.still ? sc.still(el) : null;
-  }
-  function play(instant) {
-    var tok = ++S.token, stage = $('stage'); stage.innerHTML = ''; S.auto = !instant; window.__story = { played: [], done: false }; $('resume').hidden = true; chrome();
-    var p = Promise.resolve();
-    SCENES.forEach(function (sc) {
-      p = p.then(function () {
-        if (tok !== S.token) return;
-        var iv = setInterval(function () { if (tok === S.token && !sc.ready()) waitNote(true); }, 900);
-        return until(function () { return sc.ready(); }, tok).then(function () {
-          clearInterval(iv); waitNote(false); if (tok !== S.token || (sc.skip && sc.skip())) return;
-          stage.insertAdjacentHTML('beforeend', sc.html()); var el = document.getElementById('sc-' + sc.id); rail(sc.id); fixOrphans(el); lateFill(!instant);
-          [].forEach.call(el.querySelectorAll('img[data-img]'), function (im) { im.onerror = function () { var f = im.closest('.thumbs') || im.closest('figure'); if (f) f.remove(); }; });
-          if (!K || instant) { window.__story.played.push(sc.id); return settle(el, sc); }
-          if (S.auto) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          return sleep(350).then(function () { return sc.play(el, tok); }).then(function () { window.__story.played.push(sc.id); });
-        });
-      });
-    });
-    p.then(function () { if (tok === S.token) { lateFill(!instant); window.__story.done = true; rail(''); } });
-  }
-  function takeOver() { if (!S.auto || !S.d || !S.d.store || window.__story.done) return; S.auto = false; $('resume').hidden = false; }
-  ['wheel', 'touchmove', 'keydown'].forEach(function (ev) { window.addEventListener(ev, function (e) { if (ev === 'keydown' && !/^(Arrow|Page|Home|End| )/.test(e.key)) return; takeOver(); }, { passive: true }); });
-
-  // ---------- 点击 ----------
-  document.addEventListener('submit', function (ev) { if (ev.target.id !== 'f') return; ev.preventDefault(); var v = $('url').value.trim(); if (v) start(v, null, false); });
-  document.addEventListener('click', function (ev) {
-    var b = ev.target.closest('[data-pick],[data-key],[data-act],[data-qi],#resume,#lang'); if (!b) return;
-    if (b.id === 'lang') {  // 切换语言：已经在看结果的话，原地换成另一种语言的最终状态，不从头再放
-      LANG = LANG === 'zh' ? 'en' : 'zh'; T = window.COPY[LANG]; try { localStorage.setItem('geo_lang', LANG); } catch (e) {}
-      var y = window.scrollY; if (S.d && S.d.store) { play(true); setTimeout(function () { window.scrollTo(0, y); }, 60); } else entry(); return;
-    }
-    if (b.id === 'resume') { S.auto = true; b.hidden = true; var last = $('stage').lastElementChild; if (last) last.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
-    if (b.dataset.pick) return start(S.url || (S.d && S.d.input_url), +b.dataset.pick, false);
-    if (b.dataset.key) { S.key = b.dataset.key; S.busy = true; entry(); return watch(); }
-    if (b.dataset.qi != null) { var el = $('sc-qa'); if (el.classList.contains('done')) showQ(el, +b.dataset.qi, false); return; }
-    var a = b.dataset.act;
-    if (a === 'notme' || a === 'reset') { S.token++; clearInterval(S.timer); S.key = null; S.d = null; S.busy = false; S.url = ''; history.replaceState(null, '', location.pathname + location.search); $('resume').hidden = true; entry(); window.scrollTo(0, 0); var u = $('url'); if (u) u.focus(); return; }
-    if (a === 'redo') return start(S.url || S.d.input_url, S.pick, true);
+/* ---------- 骨架波浪：每块骨架截取同一条横跨容器的光带，光从右往左一整道扫过去 ---------- */
+function setWave(root){
+  if (!root) return;
+  const r = root.getBoundingClientRect();
+  root.querySelectorAll('.sk').forEach(el => {
+    const b = el.getBoundingClientRect();
+    el.style.setProperty('--x', (b.left - r.left) + 'px');
+    el.style.setProperty('--W', r.width + 'px');
+    el.style.setProperty('--y', Math.round((b.top - r.top) * .35));
   });
+}
 
-  // ---------- 开场 ----------
-  var m = /[#&]k=([^&]+)/.exec(location.hash);
-  if (m) { S.key = decodeURIComponent(m[1]); S.busy = true; entry(); watch(); }
-  else { entry(); if (DEMO) api('/api/list').then(function (j) { S.tried = (j.items || []).filter(function (x) { return x.status === 'done' || x.status === 'full_running'; }); entry(); }).catch(function () {}); }
+/* ---------- 平台滚动带 + 平台格子 ---------- */
+const PF1 = [['google','Google 地图','点评'],['yelp','Yelp','点评'],['tripadvisor','Tripadvisor','点评'],['ubereats','Uber Eats','外卖'],['doordash','DoorDash','外卖'],['grubhub','Grubhub','外卖'],['instagram','Instagram','社交'],['tiktok','TikTok','社交'],['reddit','Reddit','社交'],['xiaohongshu','小红书','社交'],['restaurantguru','Restaurant Guru','点评']];
+const PF2 = [['eater','Eater','媒体'],['infatuation','The Infatuation','媒体'],['michelin','MICHELIN Guide','媒体'],['timeout','Time Out','媒体'],['seamless','Seamless','外卖'],['fantuan','饭团外卖','外卖'],['hungrypanda','熊猫外卖','外卖'],['facebook','Facebook','社交'],['wanderlog','Wanderlog','媒体'],['yellowpages','Yellow Pages','点评'],['menupages','MenuPages','媒体'],['ezcater','ezCater','团餐']];
+function fill(ul, list){
+  const one = list.map(p => '<li><img class="pi" src="' + ic(p[0]) + '" alt="">' + p[1] + '<em>' + p[2] + '</em></li>').join('');
+  ul.innerHTML = one + one.replace(/<li>/g, '<li class="dup" aria-hidden="true">');
+}
+fill($('#mq1'), PF1); fill($('#mq2'), PF2);
+const GRID = [['google','Google 地图',1],['yelp','Yelp',1],['eater','Eater',0],['ubereats','Uber Eats',1],['infatuation','The Infatuation',0],['instagram','Instagram',1],['reddit','Reddit',0],['doordash','DoorDash',1],['tripadvisor','Tripadvisor',1],['timeout','Time Out',0],['tiktok','TikTok',1],['grubhub','Grubhub',1]];
+$('#pgrid').innerHTML = GRID.map((p, i) => '<div class="pf' + (p[2] ? '' : ' x') + '" style="--i:' + i + '"><img class="pi" src="' + ic(p[0]) + '" alt=""><div><b>' + p[1] + '</b><span>' + (p[2] ? '有你' : '没有你 · 对手有') + '</span></div></div>').join('');
+document.querySelectorAll('img[data-pf]').forEach(i => { i.src = ic(i.dataset.pf); });
+
+/* ---------- 问 AI 演示：打字 → 发送 → 骨架闪 → 名单出现 → 删掉 → 下一个 ---------- */
+const QS = [
+  { en:'best soup dumplings near me', zh:'客人在问：附近哪家汤包好吃', list:['Lucky Bowl','@','Pell St. Kitchen','Canal Noodle Co.'] },
+  { en:'late night noodles in Chinatown', zh:'客人在问：唐人街哪里能吃宵夜面', list:['Canal Noodle Co.','Golden Reed','Lucky Bowl',null] },
+  { en:'where to take my parents for dim sum', zh:'客人在问：带爸妈去哪吃早茶', list:['Jade Pavilion','Pell St. Kitchen','Golden Reed','@'] },
+  { en:'cheap eats near Bowery under $20', zh:'客人在问：Bowery 附近 20 美元以内吃什么', list:['@','Lucky Bowl','Mott & Co.','Canal Noodle Co.'] }
+];
+const chat = $('#chat'), typed = $('#typed'), comp = $('#composer'), gloss = $('#gloss'), verdict = $('#verdict'), input = $('#q');
+const rows = [...$('#ans').children];
+let chatTok = 0;
+const cleanName = v => v.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '');
+function myName(){ const v = input.value.trim(); return v ? cleanName(v) : '你的店'; }
+function clearRows(){ rows.forEach(li => li.classList.remove('on', 'is-you', 'is-miss')); verdict.classList.remove('on'); }
+async function showAnswer(q, tok){
+  chat.classList.add('waving', 'thinking'); setWave(chat);
+  await sleep(RM ? 0 : 950); if (tok !== chatTok) return;
+  chat.classList.remove('waving', 'thinking');
+  let pos = 0;
+  for (let i = 0; i < rows.length; i++){
+    const li = rows[i], v = q.list[i];
+    li.querySelector('.nm').textContent = v === '@' ? myName() : v === null ? '名单里没有你' : v;
+    li.querySelector('.n').textContent = v === null ? '–' : String(i + 1);
+    li.classList.toggle('is-you', v === '@'); li.classList.toggle('is-miss', v === null);
+    if (v === '@') pos = i + 1;
+    li.classList.add('on');
+    await sleep(RM ? 0 : 110); if (tok !== chatTok) return;
+  }
+  verdict.textContent = pos ? '推荐了你 · 第 ' + pos : '没推荐你';
+  verdict.className = 'verdict on ' + (pos ? 'good' : 'bad');
+}
+async function chatLoop(){
+  const tok = ++chatTok; let i = 0;
+  while (tok === chatTok){
+    const q = QS[i % QS.length]; i++;
+    await sleep(RM ? 300 : 700); if (tok !== chatTok) return;
+    gloss.textContent = q.zh; gloss.classList.add('on');
+    comp.classList.add('typing');
+    if (RM) typed.textContent = q.en;
+    else for (const ch of q.en){ typed.textContent += ch; await sleep(34 + Math.random() * 55 + (ch === ' ' ? 40 : 0)); if (tok !== chatTok) return; }
+    comp.classList.remove('typing'); comp.classList.add('armed');
+    await sleep(RM ? 200 : 650); if (tok !== chatTok) return;
+    comp.classList.add('sent'); setTimeout(() => comp.classList.remove('sent'), 220);
+    await showAnswer(q, tok); if (tok !== chatTok) return;
+    await sleep(RM ? 4000 : 2900); if (tok !== chatTok) return;
+    clearRows(); gloss.classList.remove('on'); comp.classList.remove('armed'); comp.classList.add('typing');
+    if (RM) typed.textContent = '';
+    else while (typed.textContent.length){ typed.textContent = typed.textContent.slice(0, -1); await sleep(16); if (tok !== chatTok) return; }
+    comp.classList.remove('typing');
+  }
+}
+function stopChat(){ chatTok++; chat.classList.remove('waving', 'thinking'); clearRows(); typed.textContent = ''; gloss.classList.remove('on'); comp.className = 'composer'; }
+input.addEventListener('input', () => rows.forEach(li => { if (li.classList.contains('is-you')) li.querySelector('.nm').textContent = myName(); }));
+
+/* ---------- 报告展台：目录高亮滑过去，卡片一叠一叠往前换；4 秒一换，鼠标放上去暂停 ---------- */
+const tocItems = [...document.querySelectorAll('.toc button')], cards = [...document.querySelectorAll('.card')], hl = $('.toc .hl'), toc = $('.toc');
+let cur = 0, timer = null, hovering = false;
+function placeHL(){ const b = tocItems[cur]; hl.style.width = b.offsetWidth + 'px'; hl.style.height = b.offsetHeight + 'px'; hl.style.transform = 'translate(' + b.offsetLeft + 'px,' + b.offsetTop + 'px)'; }
+function showCard(i){
+  const prev = cur, n = cards.length; cur = i;
+  tocItems.forEach((b, k) => { b.classList.toggle('on', k === i); b.setAttribute('aria-selected', String(k === i)); });
+  cards.forEach((c, k) => {
+    const d = (k - i + n) % n;
+    c.classList.remove('s0', 's1', 's2', 'out');
+    if (d === 0) c.classList.add('s0'); else if (d === 1) c.classList.add('s1'); else if (d === 2) c.classList.add('s2'); else if (k === prev) c.classList.add('out');
+  });
+  placeHL();
+  if (toc.scrollWidth > toc.clientWidth) toc.scrollTo({ left: tocItems[i].offsetLeft - 16, behavior: RM ? 'auto' : 'smooth' });
+}
+function arm(){ clearInterval(timer); if (RM) return; timer = setInterval(() => { if (!hovering && view === 'home' && !document.hidden) showCard((cur + 1) % cards.length); }, 4000); }
+tocItems.forEach((b, k) => b.addEventListener('click', () => { showCard(k); arm(); }));
+$('#showBody').addEventListener('mouseenter', () => { hovering = true; });
+$('#showBody').addEventListener('mouseleave', () => { hovering = false; });
+
+/* =====================================================================
+   报告页
+   数据：/api/result?key=<店> 读回来的 result.json（字段说明见各 render 函数）。
+   流程：读数据 → build() 整理成页面要用的样子 → 每一屏各自 render → 加载动画一屏一屏亮出来。
+   ===================================================================== */
+const T = window.COPY, rpEl = $('#rp'), prog = $('#prog');
+const t = (s, v) => String(s).replace(/\{(\w+)\}/g, (_, k) => v && v[k] != null ? v[k] : '');
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const nf = n => Number(n || 0).toLocaleString('en-US');
+const CHK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+const BANG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6v8M12 18h.01"/></svg>';
+const ARR = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>';
+const GO = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 7l5 5-5 5"/></svg>';
+const CHEV = '<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
+const STAR = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.9 5.9 6.5.9-4.7 4.6 1.1 6.5-5.8-3.1-5.8 3.1 1.1-6.5L2.6 9.4l6.5-.9z"/></svg>';
+const pfIcon = k => ic(String(k).replace(/^cat_/, ''));
+const ENG = [['chatgpt_web', 'chatgpt', 'ChatGPT'], ['google_aimode', 'google', 'Google AI']];
+let M = null, KEY = '';
+
+/* ---------- 把 result.json 整理成页面要用的样子 ---------- */
+function build(d){
+  const st = d.store || {}, por = d.portrait || {}, dim = {};
+  ((d.score || {}).dims || []).forEach(x => { if (x.score != null) dim[x.key] = x; });
+  const nDims = Object.keys(dim).length || 1, total = (d.score || {}).total || 0;
+
+  /* 问题：每个问题、每个 AI 问了几遍，哪几遍推荐了这家店 */
+  const qs = (d.questions || []).map(q => {
+    const runs = ENG.map(e => (((q.engines || {})[e[0]]) || []).filter(r => r.status === 'ok'));
+    const all = runs[0].concat(runs[1]);
+    return { zh: q.text_zh || q.text, en: q.text_zh ? q.text : '', runs, asked: all.length, rec: all.filter(r => r['class'] === 'recommend').length };
+  }).filter(q => q.asked);
+  const eng = ENG.map((e, i) => ({ n: qs.reduce((a, q) => a + q.runs[i].length, 0), rec: qs.reduce((a, q) => a + q.runs[i].filter(r => r['class'] === 'recommend').length, 0) }));
+  const asked = eng[0].n + eng[1].n, rec = eng[0].rec + eng[1].rec;
+
+  /* 对手：AI 回答里出现最多的几家。评分还没查到的店，先用示例数字（页面上会注明） */
+  const rivals = (d.rivals || []).map(r => ({ name: r.name, count: r.count || 0, rating: r.rating, reviews: r.review_count }));
+  let repRivals = rivals.filter(r => r.rating && r.reviews).slice(0, 3), repSim = false;
+  if (!repRivals.length && rivals.length){
+    repSim = true;
+    repRivals = rivals.slice(0, 3).map(r => { let h = 0; for (const c of r.name) h = (h * 31 + c.charCodeAt(0)) >>> 0; return { name: r.name, count: r.count, rating: Math.round((4.3 + (h % 5) / 10) * 10) / 10, reviews: Math.round((st.review_count || 500) * (1.6 + (h % 23) / 10) / 10) * 10 }; });
+  }
+
+  /* 平台：y = 有你，x = 对手有你没有，z = 都没有 */
+  const rp = d.rival_platforms || {}, rf = rp.found || {}, hasRival = !!rp.name;
+  const pf = (((d.platforms || {}).rows) || []).filter(r => !r.error && (r.kind === 'page' || r.kind === 'mention')).map(r => ({ key: r.key, name: String(r.name).replace(' 地图', ' 地图'), sub: r.sub, domain: r.domain, cat: r.found ? 'y' : (!hasRival || rf[r.key]) ? 'x' : 'z' }));
+  const nap = (((d.platforms || {}).rows) || []).filter(r => !r.error && !r.base && (r.phone_ok != null || r.addr_ok != null || r.hours_ok != null)).map(r => ({ key: r.key, name: r.name, phone_ok: r.phone_ok, addr_ok: r.addr_ok, hours_ok: r.hours_ok }));
+  const pfN = { y: pf.filter(p => p.cat === 'y').length, x: pf.filter(p => p.cat === 'x').length, z: pf.filter(p => p.cat === 'z').length };
+
+  /* 七个方面 → 做得好的 / 要改进的（带一句有数字的话） */
+  const facts = k => { const f = Object.assign({}, (dim[k] || {}).facts || {}); f.miss = (f.n || 0) - (f.found || 0); f.out = (f.n || 0) - (f.top3 || 0); f.bad = (f.bad || []).length; f.rating = st.rating; f.reviews = nf(st.review_count); f.med_n = nf(f.med_n); f.asked = asked; f.rec = rec; return f; };
+  const dims = Object.keys(dim).filter(k => T.dims[k]).map(k => { const good = dim[k].score >= 60, c = T.dims[k]; return { key: k, score: dim[k].score, good, to: c.to, title: good ? c.tGood : c.tBad, line: t(good ? c.good : c.bad, facts(k)) }; });
+  const ORDER = ['ai', 'reputation', 'map', 'website', 'media', 'platforms', 'consistency'];
+  const good = dims.filter(x => x.good).sort((a, b) => ORDER.indexOf(a.key) - ORDER.indexOf(b.key)), bad = dims.filter(x => !x.good).sort((a, b) => a.score - b.score);
+
+  /* 行动：每件事大概能加几分。数据里没有这个数，这里按「把对应那一项补到 70 分」估算 */
+  const GAIN = { media: 'media', dish: 'website', engine: 'ai', site: 'website', website: 'website', platforms: 'platforms', map: 'map', reviews: 'reputation' };
+  const actions = (d.actions || []).map(a => { const x = dim[GAIN[a.id]]; return { id: a.id, title: a.title, see: a.see, do: a['do'], gain: x && x.score < 70 ? Math.max(1, Math.round((70 - x.score) / nDims)) : 0 }; });
+
+  const groups = (d.source_groups || []).slice(), own = groups.filter(g => g.kind === 'own')[0] || { count: 0, names: [] };
+  return {
+    key: d.key, date: d.asked_on, store: st, total, nap, demoBad: !!d._demoBad, dim, dims, good, bad, qs, eng, asked, rec, rivals, repRivals, repSim, pf, pfN, rivalName: rp.name || '', actions,
+    photos: [por.photo].concat(por.photos || []).filter(Boolean).slice(0, 4), dishes: (por.dishes || []).slice(0, 3), quote: (por.quotes || [])[0],
+    groups: groups.filter(g => g.kind !== 'own').sort((a, b) => b.count - a.count), own, srcTotal: groups.reduce((a, g) => a + (g.count || 0), 0), sites: (d.sites || []).slice(0, 8), grid: d.grid || null,
+    verdict: total >= 76 ? T.verdictHigh : (st.rating >= 4.5 ? T.verdictLoved : T.verdictUnknown)
+  };
+}
+
+/* ---------- 标题打字：字先全部排好占住位置，再一个一个显出来 ---------- */
+function tySet(h, html){
+  const walk = (node, cls) => [...node.childNodes].map(n => n.nodeType === 3 ? [...n.nodeValue].map(ch => '<span class="ch' + cls + '">' + esc(ch) + '</span>').join('') : n.tagName === 'BR' ? '<br>' : walk(n, n.classList && n.classList.contains('r') ? ' r' : n.classList && n.classList.contains('a') ? ' a' : cls)).join('');
+  const tmp = document.createElement('div'); tmp.innerHTML = html;
+  h.setAttribute('aria-label', tmp.textContent); h.innerHTML = walk(tmp, ''); h._c = [...h.querySelectorAll('.ch')]; h._tok = (h._tok || 0) + 1;
+}
+async function tyRun(h){
+  if (!h || !h._c) return; const tok = ++h._tok, cs = h._c;
+  cs.forEach(c => c.classList.remove('on')); const old = h.querySelector('.cr'); if (old) old.remove();
+  if (RM){ cs.forEach(c => c.classList.add('on')); return; }
+  const cr = document.createElement('i'); cr.className = 'cr'; cr.setAttribute('aria-hidden', 'true'); h.appendChild(cr); h.classList.add('typing');
+  for (const c of cs){
+    c.classList.add('on'); cr.style.cssText = 'left:' + (c.offsetLeft + c.offsetWidth) + 'px;top:' + (c.offsetTop + c.offsetHeight * .1) + 'px;height:' + (c.offsetHeight * .8) + 'px';
+    await sleep(/[⺀-￿]/.test(c.textContent) ? 34 : 16); if (tok !== h._tok) return;
+  }
+  h.classList.remove('typing'); await sleep(1600); if (tok === h._tok) cr.remove();
+}
+
+/* ---------- 封面 ---------- */
+const phs = $$('.rp-ph'), lb = $('#lb'), lbImg = $('#lbImg');
+function renderCover(){
+  const s = M.store, h = $('#rName'), PIN = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s7-6.2 7-11.5A7 7 0 0 0 5 9.5C5 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>';
+  h.classList.toggle('long', String(s.name).length > 22); tySet(h, esc(s.name));
+  $('#rMeta').innerHTML = PIN + '<span>' + esc(s.address) + '</span>';
+  $('#rBadge').innerHTML = '<img class="pi" src="' + ic('google') + '" alt="Google">' + STAR + '<b>' + esc(s.rating) + '</b><span>' + nf(s.review_count) + ' 条评价</span>';
+  phs.forEach((b, i) => { const im = b.querySelector('img'); b.hidden = !M.photos[i]; if (M.photos[i]){ im.src = M.photos[i]; im.alt = s.name + ' 的照片 ' + (i + 1); } });
+  $('.cv__r').hidden = !M.photos.length;
+  const q = M.quote;
+  $('#rSay').innerHTML = !M.dishes.length ? '' : '<p class="cv__lab"><img class="pi" src="' + ic('google') + '" alt="">Google 评价里，客人最常提的</p><ul class="cv__dish">' + M.dishes.map(x => '<li><strong>' + x.mentions + '<small>条评价提到</small></strong><b>' + esc(x.zh || x.name) + '</b><em>' + esc(x.zh ? x.name : '') + '</em></li>').join('') + '</ul>' +
+    (q ? '<blockquote class="cv__q">' + esc(q.text) + (q.zh ? '<small>' + esc(q.zh) + '</small>' : '') + '<cite>' + (q.rating >= 4 ? '<span>' + '★★★★★'.slice(0, Math.round(q.rating)) + '</span>' : '') + esc(q.author || '') + ' · Google 评价</cite></blockquote>' : '');
+}
+const phoneFmt = s => { const m = /^1?(\d{3})(\d{3})(\d{4})$/.exec(String(s || '').replace(/\D/g, '')); return m ? '(' + m[1] + ') ' + m[2] + '-' + m[3] : String(s || ''); };
+const dateZh = s => { const m = /^(\d{4})-(\d\d)-(\d\d)/.exec(s || ''); return m ? m[1] + ' 年 ' + (+m[2]) + ' 月 ' + (+m[3]) + ' 日' : ''; };
+
+/* ---------- 01 得分 ---------- */
+function renderScore(){
+  const s = M.total, band = s < 50 ? 'low' : s < 76 ? 'mid' : 'high';
+  tySet($('#hScore'), M.verdict);
+  const pts = (M.bad.length ? M.good.slice(0, 1) : M.good.slice(0, 3)).map(x => ['ok', x.line]).concat(M.bad.slice(0, 2).map(x => ['no', x.line]));
+  $('#sc').innerHTML = '<div class="sc__l"><p class="sc__n"><b data-count="' + s + '">' + s + '</b><span>/ 100</span><em>' + T.band[band] + '</em></p><div class="sc__bar" style="--p:' + s + '%" data-skb><i class="z1"></i><i class="z2"></i><i class="z3"></i><b><em>' + T.here + '</em></b></div><p class="sc__ax"><span>' + T.band.low + '</span><span>' + T.band.mid + '</span><span>' + T.band.high + '</span></p></div>' +
+    '<div class="sc__r"><ul class="sc__pts">' + pts.map((p, i) => '<li class="' + p[0] + '" style="--i:' + i + '"><i>' + (p[0] === 'ok' ? CHK : BANG) + '</i><span>' + esc(p[1]) + '</span></li>').join('') + '</ul><a class="btn rise d3" href="#r-plan" data-goto>' + T.toPlan + GO + '</a></div>';
+  const g = M.grid, cells = (g && g.cells) || [], top3 = cells.filter(c => c.rank && c.rank <= 3).length, n20 = M.asked ? Math.round(M.rec / M.asked * 20) : 0, logos = M.pf.filter(p => p.cat === 'y').slice(0, 7);
+  $('#vit').innerHTML =
+    '<a href="#r-ai" data-goto><div class="vit__g"><div class="vg-dots">' + Array.from({ length: 20 }, (_, i) => '<i class="' + (i < n20 ? 'y' : '') + '" style="--i:' + i + '"></i>').join('') + '</div></div><p>' + M.rec + '<small>/ ' + M.asked + '</small></p><span>次提问，AI 推荐了你</span>' + ARR + '</a>' +
+    '<a href="#r-map" data-goto><div class="vit__g"><div class="vg-grid">' + cells.map((c, i) => '<i class="' + (!c.rank ? '' : c.rank <= 3 ? 't' : c.rank <= 10 ? 'm' : '') + '" style="--i:' + (i + 6) + '"></i>').join('') + '</div></div><p>' + top3 + '<small>/ ' + cells.length + '</small></p><span>个路口排进地图前 3</span>' + ARR + '</a>' +
+    '<a href="#r-pf" data-goto><div class="vit__g"><div class="vg-logos">' + logos.map(p => '<img src="' + pfIcon(p.key) + '" alt="">').join('') + '</div></div><p>' + M.pfN.y + '<small>/ ' + M.pf.length + '</small></p><span>个平台和媒体上有你</span>' + ARR + '</a>' +
+    '<a href="#r-rep" data-goto><div class="vit__g"><span class="stars" style="--v:' + (M.store.rating / 5 * 100).toFixed(1) + '%"><i>★★★★★</i><i>★★★★★</i></span></div><p>' + esc(M.store.rating) + '<small>分</small></p><span>' + nf(M.store.review_count) + ' 条 Google 评价</span>' + ARR + '</a>';
+}
+
+/* ---------- 02 AI 怎么说：问题 + 点阵 + 重放回答 ---------- */
+let qSel = { q: 0, e: 0, r: 0 }, qTok = 0;
+function qPick(k){ const q = M.qs[k]; for (let e = 1; e >= 0; e--){ const r = q.runs[e].findIndex(x => x['class'] === 'recommend'); if (r >= 0) return { q: k, e, r }; } return { q: k, e: q.runs[1].length ? 1 : 0, r: 0 }; }
+function renderQA(){
+  const dense = Math.max.apply(null, M.qs.map(q => Math.max(q.runs[0].length, q.runs[1].length)).concat([0])) > 4, LIM = 8;
+  tySet($('#hAi'), t(T.hAi, { asked: M.asked, rec: M.rec, c: M.rec / (M.asked || 1) < .5 ? 'r' : 'a' })); $('#lAi').textContent = T.lAi;
+  const qa = $('#qa'); qa.className = 'qa' + (dense ? ' qa--dense' : '');
+  qa.innerHTML = '<div class="qa__l"><p class="qa__eng">' + ENG.map((e, i) => '<span class="' + (M.eng[i].rec ? '' : 'zero') + '"><img class="pi" src="' + ic(e[1]) + '" alt="">' + e[2] + ' 推荐你 <b>' + M.eng[i].rec + '</b> / ' + M.eng[i].n + ' 次</span>').join('') + '</p><ol class="qa__list" id="qlist">' +
+    M.qs.map((q, k) => { let n = 0; return '<li class="' + (k >= LIM ? 'more' : '') + '"><button type="button" data-q="' + k + '"><span class="t">' + esc(q.zh) + '</span>' + (q.en ? '<small>' + esc(q.en) + '</small>' : '<small></small>') + '<span class="dots">' + ENG.map((e, i) => '<span class="g"><img class="pi" src="' + ic(e[1]) + '" alt="' + e[2] + '">' + q.runs[i].map((r, j) => { const hit = r['class'] === 'recommend'; return '<i class="' + (hit ? 'y' : '') + '" data-e="' + i + '" data-r="' + j + '" style="--i:' + (k * 4 + n++) + '" data-tip="' + e[2] + ' · 第 ' + (j + 1) + ' 次 · ' + (hit ? '<b>推荐了你</b>' + (r.position ? '，排第 ' + r.position : '') : '没提到你') + '"></i>'; }).join('') + '</span>').join('') + '</span><em class="' + (q.rec ? '' : 'zero') + '">' + q.rec + ' / ' + q.asked + '</em></button></li>'; }).join('') +
+    '</ol>' + (M.qs.length > LIM ? '<button type="button" class="qa__more" id="qaMore">' + t(T.qaAll, { n: M.qs.length }) + '</button>' : '') + '</div><div class="qa__r"><div class="qc-w"><div class="qc" id="qc" aria-live="polite"></div></div></div>';
+  qSel = qPick(0); qShow(false);
+  /* 排行 */
+  const rows = M.rivals.slice(0, 4).map(r => [r.name, r.count, 0]).concat([[T.you, M.rec, 1]]).sort((a, b) => b[1] - a[1]), max = Math.max.apply(null, rows.map(r => r[1]).concat([1])), lead = rows[0];
+  $('#rank').innerHTML = '<h3>' + (lead[2] ? t(T.rankAhead, { asked: M.asked }) : t(T.rankBehind, { asked: M.asked, count: lead[1], rec: M.rec })) + '</h3><div class="rank__rows">' + rows.map((r, i) => '<div class="' + (r[2] ? 'me' : '') + '"><span>' + esc(r[0]) + '</span><i style="--w:' + Math.max(2, Math.round(r[1] / max * 100)) + '%;--i:' + i + '"></i><b data-to="' + r[1] + '">0</b></div>').join('') + '</div>';
+  $('#rank').classList.remove('in');
+}
+async function qShow(anim){
+  const tok = ++qTok, q = M.qs[qSel.q], run = q.runs[qSel.e][qSel.r], e = ENG[qSel.e], qc = $('#qc'); if (!run) return;
+  $$('#qlist button').forEach(b => b.classList.toggle('on', +b.dataset.q === qSel.q));
+  $$('#qlist .dots i').forEach(i => i.classList.toggle('sel', +i.closest('button').dataset.q === qSel.q && +i.dataset.e === qSel.e && +i.dataset.r === qSel.r));
+  const hit = run['class'] === 'recommend', names = run.names || [], pos = hit ? (run.position || 0) : 0;
+  let show = names.slice(0, 6).map((n, i) => [i + 1, n]); if (pos > 6) show = show.slice(0, 5).concat([[pos, names[pos - 1]]]);
+  const rest = names.length - show.length, src = (run.cited_domains || []).slice(0, 5);
+  qc.innerHTML = '<p class="qc__q"><span id="qcQ"></span></p><p class="qc__who"><span><img class="pi" src="' + ic(e[1]) + '" alt="">' + e[2] + '<small>' + t(T.qcNth, { r: qSel.r + 1, n: q.runs[qSel.e].length }) + '</small></span><span class="qc__v ' + (hit ? 'good' : 'bad') + '">' + (hit ? (pos ? t(T.qcYes, { pos }) : '推荐了你') : T.qcNo) + '</span></p><ol class="ans">' +
+    show.map(r => '<li class="' + (r[0] === pos ? 'is-you' : '') + '"><span class="n">' + r[0] + '</span><span class="line"><span class="nm">' + esc(r[1]) + '</span></span><span class="you">你</span></li>').join('') +
+    (rest > 0 ? '<li class="more on"><span class="nm" style="opacity:1;filter:none;transform:none">' + t(T.qcMore, { n: rest }) + '</span></li>' : '') +
+    (hit ? '' : '<li class="is-miss"><span class="n">–</span><span class="line"><span class="nm">' + T.qcMiss + '</span></span><span class="you">你</span></li>') +
+    '</ol><p class="qc__src">' + (src.length ? T.qcSrc + src.map(s => '<span>' + esc(s) + '</span>').join('') : T.qcNoSrc) + '</p>';
+  const text = q.en || q.zh, el = $('#qcQ'), lis = $$('#qc .ans li:not(.more)');
+  if (!anim || RM){ el.textContent = text; lis.forEach(li => li.classList.add('on')); return; }
+  for (const ch of text){ el.textContent += ch; await sleep(/[⺀-￿]/.test(ch) ? 38 : 20); if (tok !== qTok) return; }
+  await sleep(260); if (tok !== qTok) return;
+  for (const li of lis){ li.classList.add('on'); await sleep(90); if (tok !== qTok) return; }
+}
+$('#qa').addEventListener('click', e => {
+  const more = e.target.closest('#qaMore'); if (more){ const on = $('#qa').classList.toggle('all'); more.textContent = on ? T.qaLess : t(T.qaAll, { n: M.qs.length }); return; }
+  const dot = e.target.closest('.dots i'), b = e.target.closest('#qlist button'); if (!b) return;
+  qSel = dot ? { q: +b.dataset.q, e: +dot.dataset.e, r: +dot.dataset.r } : qPick(+b.dataset.q); qShow(true);
+});
+
+/* ---------- 03 AI 看哪里 ---------- */
+function renderSrc(){
+  const own = M.own.count || 0, K = { rival: 'k-rival', editorial: 'k-editorial', claimable: 'k-claimable' }, rv = (M.groups.filter(g => g.kind === 'rival')[0] || {}).count || 0;
+  const v = { total: nf(M.srcTotal), own: nf(own), rival: nf(rv) }, mode = !own ? 'Zero' : own < rv ? 'Less' : 'Lead';
+  tySet($('#hSrc'), t(T['hSrc' + mode], v)); $('#lSrc').textContent = t(T.lSrc, v);
+  $('#tSrc').innerHTML = '<span>' + T['take' + mode] + '</span><a href="#r-plan" data-goto>' + T.takeGo + '</a>';
+  const lab = g => T.srcKinds[g.kind] || esc(g.label), eg = g => (g.names || []).length ? t(T.srcEg, { names: esc(g.names.slice(0, 3).join('、')) }) : '';
+  const tipOf = g => '<b>' + lab(g) + ' · ' + nf(g.count) + ' 次</b>' + (g.n_sites ? '<br>' + t(T.srcTipN, { n: g.n_sites }) : '') + (eg(g) ? '，' + eg(g) : '') + (T.srcWhy[g.kind] ? '<br>' + T.srcWhy[g.kind] : '');
+  const ownTip = '<b>' + T.srcKinds.own + ' · ' + nf(own) + ' 次</b><br>' + (own ? T.srcWhy.own : T.srcWhy.ownZero);
+  $('#src').innerHTML = '<div class="src__bar" data-skb>' + M.groups.map((g, i) => '<i class="' + (K[g.kind] || 'k-other') + '" data-k="' + i + '" data-tip="' + esc(tipOf(g)) + '" style="--n:' + Math.max(1, g.count) + ';--i:' + i + '"><b>' + nf(g.count) + '</b><span>' + lab(g) + '</span></i>').join('') + '<i class="k-own' + (own ? '' : ' zero') + '" data-k="' + M.groups.length + '" data-tip="' + esc(ownTip) + '" style="--n:' + Math.max(1, own) + ';--i:' + M.groups.length + '"><b>' + nf(own) + '</b><span>' + T.srcKinds.own + '</span></i></div><ul class="src__lg rise">' +
+    M.groups.map((g, i) => '<li data-k="' + i + '" data-tip="' + esc(tipOf(g)) + '"><span><i class="' + (K[g.kind] || 'k-other') + '"></i>' + lab(g) + '</span><small>' + eg(g) + '</small></li>').join('') +
+    '<li class="own" data-k="' + M.groups.length + '" data-tip="' + esc(ownTip) + '"><span><i class="k-own' + (own ? '' : ' zero') + '"></i>' + T.srcKinds.own + '</span><small>' + esc((M.own.names || []).join('、')) + '</small></li></ul>';
+  const max = Math.max.apply(null, M.sites.map(s => s.count).concat([1]));
+  $('#sites').innerHTML = M.sites.map(s => {
+    const p = M.pf.filter(x => x.domain && (s.domain === x.domain || s.domain.endsWith('.' + x.domain)))[0];
+    const st = s.kind === 'own' ? ['', T.siteOwn] : s.kind === 'rival' ? ['', esc(s.kind_zh || T.siteRival)] : p ? (p.cat === 'y' ? ['yes', T.siteYes] : ['no', T.siteNo]) : ['', esc(s.kind_zh || '')];
+    return '<li>' + (p ? '<img class="av" src="' + pfIcon(p.key) + '" alt="">' : '<span class="av">' + esc(String(s.name || s.domain).charAt(0)) + '</span>') + '<b>' + esc(s.name || s.domain) + '</b><span class="bar"><i class="' + (s.kind === 'own' ? 'k-own' : K[s.kind] || 'k-other') + '" style="--w:' + Math.round(s.count / max * 100) + '%"></i><span>' + t(T.times, { n: s.count }) + '</span></span><em class="' + st[0] + '">' + st[1] + '</em></li>';
+  }).join('');
+  $('#sitesFold .fold__b span').textContent = t(T.sitesBtn, { n: M.sites.length }); $('#sitesFold').hidden = !M.sites.length;
+}
+$('#src').addEventListener('mouseover', e => { const el = e.target.closest('[data-k]'), box = $('#src'); if (!el) return; box.classList.add('hot'); $$('[data-k]', box).forEach(x => x.classList.toggle('on', x.dataset.k === el.dataset.k)); });
+$('#src').addEventListener('mouseleave', () => { const box = $('#src'); box.classList.remove('hot'); $$('[data-k]', box).forEach(x => x.classList.remove('on')); });
+$('#sitesFold .fold__b').addEventListener('click', e => { const f = $('#sitesFold'), o = !f.classList.contains('open'); f.classList.toggle('open', o); e.currentTarget.setAttribute('aria-expanded', String(o)); });
+
+/* ---------- 04 地图：店和 9 个路口按经纬度落在真实底图上（底图瓦片走 /api/tile） ---------- */
+const Z = 15, TILE = 256;
+const wx = lng => (lng + 180) / 360 * Math.pow(2, Z) * TILE;
+const wy = lat => { const s = Math.sin(lat * Math.PI / 180); return (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * Math.pow(2, Z) * TILE; };
+let mapCell = () => {};
+function renderMap(){
+  const g = M.grid, m = $('#rmap'), sec = $('#r-map'); sec.hidden = !(g && g.cells && g.cells.length); if (sec.hidden) return;
+  const cells = g.cells, xs = cells.map(c => wx(+c.lng)), ys = cells.map(c => wy(+c.lat)), x0 = Math.min.apply(null, xs), x1 = Math.max.apply(null, xs), y0 = Math.min.apply(null, ys), y1 = Math.max.apply(null, ys);
+  const V = Math.max(x1 - x0, y1 - y0) * 1.42, left = (x0 + x1) / 2 - V / 2, top = (y0 + y1) / 2 - V / 2, pct = px => (px / V * 100).toFixed(3) + '%';
+  const sx = wx(+M.store.lng) - left, sy = wy(+M.store.lat) - top, n = cells.length, top3 = cells.filter(c => c.rank && c.rank <= 3).length;
+  let home = 0, best = 1e9; cells.forEach((c, i) => { const dd = Math.hypot(xs[i] - left - sx, ys[i] - top - sy); if (dd < best){ best = dd; home = i; } });
+  const order = cells.map((c, i) => [i, Math.hypot(xs[i] - left - sx, ys[i] - top - sy)]).sort((a, b) => a[1] - b[1]).map(v => v[0]);
+  let tiles = '';
+  for (let tx = Math.floor(left / TILE); tx <= Math.floor((left + V) / TILE); tx++) for (let ty = Math.floor(top / TILE); ty <= Math.floor((top + V) / TILE); ty++)
+    tiles += '<img class="tl" alt="" src="/api/tile?z=' + Z + '&x=' + tx + '&y=' + ty + '" style="left:' + pct(tx * TILE - left) + ';top:' + pct(ty * TILE - top) + ';width:' + pct(TILE + 0.6) + '">';
+  m.style.setProperty('--sx', pct(sx)); m.style.setProperty('--sy', pct(sy));
+  m.innerHTML = tiles + '<span class="rp-scan" style="left:' + pct(sx) + ';top:' + pct(sy) + '"></span>' +
+    cells.map((c, i) => '<button type="button" class="rp-pt ' + (!c.rank ? '' : c.rank <= 3 ? 't' : c.rank <= 10 ? 'm' : '') + (i === home ? ' sel' : '') + '" data-c="' + i + '" style="left:' + pct(xs[i] - left) + ';top:' + pct(ys[i] - top) + ';--i:' + order.indexOf(i) + '" aria-label="路口 ' + (i + 1) + (c.rank ? '，你排第 ' + c.rank : '，没搜到你') + '">' + (c.rank || '–') + '</button>').join('') +
+    '<span class="rp-home" style="left:' + pct(sx) + ';top:' + pct(sy) + '">' + T.homeTag + '</span><span class="rp-credit">底图 © OpenStreetMap · CARTO</span>';
+  mapCell = (i, anim) => {
+    const c = cells[i], el = $('#rcell');
+    const body = '<p>' + t(i === home ? T.cellHome : T.cell, { i: i + 1 }) + '</p><h3>' + (c.rank ? t(T.cellRank, { rank: c.rank, c: c.rank <= 3 ? '' : 'no' }) : T.cellOut) + '</h3><ol>' + (c.top || []).slice(0, 3).map((nm, k) => '<li class="' + (c.rank === k + 1 ? 'me' : '') + '"><span>' + (k + 1) + '</span><b>' + esc(nm) + '</b></li>').join('') + '</ol>';
+    if (!anim){ el.innerHTML = body; return; }
+    el.classList.add('swap'); setTimeout(() => { el.innerHTML = body; el.classList.remove('swap'); }, 200);
+  };
+  mapCell(home, false);
+  tySet($('#hMap'), top3 === n ? t(T.hMapAll, { n }) : t(T.hMapSome, { n, out: n - top3 })); $('#lMap').textContent = t(T.lMap, { n, kw: g.keyword || '' });
+}
+$('#rmap').addEventListener('click', e => { const b = e.target.closest('.rp-pt'); if (!b) return; $$('#rmap .rp-pt').forEach(x => x.classList.toggle('sel', x === b)); mapCell(+b.dataset.c, true); });
+
+/* ---------- 05 平台 ---------- */
+function chips(f, anim){
+  const c = $('#chips'), html = M.pf.filter(p => p.cat === f).map((p, i) => '<div class="rp-chip ' + f + '" style="--i:' + i + '"><img class="pi" src="' + pfIcon(p.key) + '" alt="" onerror="this.style.visibility=\'hidden\'"><div><b>' + esc(p.name) + '</b><span>' + (f === 'x' ? (M.rivalName ? T.chipX : '没有你') : f === 'y' ? T.chipY : T.chipZ) + '</span></div></div>').join('');
+  if (!anim){ c.innerHTML = html; return; }
+  c.classList.add('swap'); setTimeout(() => { c.innerHTML = html; c.classList.remove('swap'); }, RM ? 0 : 200);
+}
+function renderPf(){
+  const N = M.pfN, first = N.x ? 'x' : 'y', con = M.dim.consistency;
+  tySet($('#hPf'), N.x && M.rivalName ? t(T.hPfMiss, { x: N.x }) : T.hPfOk); $('#lPf').textContent = t(T.lPf, { n: M.pf.length, y: N.y, x: N.x, z: N.z }) + (M.rivalName ? t(T.lPfRival, { rival: M.rivalName }) : '');
+  $('#ratio').innerHTML = ['y', 'x', 'z'].filter(k => N[k]).map(k => '<i class="' + k + '" style="flex:' + N[k] + '"></i>').join(''); $('#ratio').setAttribute('data-skb', '');
+  $('#pfseg').innerHTML = '<span class="thumb"></span>' + [['x', T.pfX], ['y', T.pfY], ['z', T.pfZ]].filter(k => N[k[0]]).map(k => '<button type="button" data-f="' + k[0] + '" aria-pressed="' + (k[0] === first) + '">' + k[1] + ' ' + N[k[0]] + '</button>').join('');
+  chips(first, false);
+  /* 资料核对。每个平台有 phone_ok / addr_ok（以后还可以有 hours_ok）：true = 和 Google 一样，false = 不一样，没有 = 没法核对 */
+  const FIELDS = [['phone_ok', T.napPhone, phoneFmt(M.store.phone)], ['addr_ok', T.napAddr, M.store.address], ['hours_ok', T.napHours, '']].filter(f => M.nap.some(r => r[f[0]] != null));
+  const rows = M.nap.map(r => ({ r, bad: FIELDS.filter(f => r[f[0]] === false) })).sort((a, b) => b.bad.length - a.bad.length), nBad = rows.reduce((a, x) => a + x.bad.length, 0), nAll = M.nap.reduce((a, r) => a + FIELDS.filter(f => r[f[0]] != null).length, 0), nap = $('#nap');
+  nap.hidden = !rows.length; nap.className = 'nap rise' + (nBad ? ' bad' : '');
+  nap.innerHTML = '<div class="nap__h"><i>' + (nBad ? BANG : CHK) + '</i><div><h3>' + (nBad ? t(T.napBadH, { n: nBad }) : T.napOkH) + '</h3><p>' + t(nBad ? T.napBadP : T.napOkP, { n: nAll }) + '</p></div></div>' +
+    (nBad ? '<ul class="nap__fix">' + rows.filter(x => x.bad.length).map(x => x.bad.map(f => '<li>' + t(T.napFix, { name: esc(x.r.name), what: f[1], right: esc(f[2] || '') }) + '</li>').join('')).join('') + '</ul>' : '') +
+    '<p class="nap__ref"><img class="pi" src="' + ic('google') + '" alt="">' + T.napRef + FIELDS.filter(f => f[2]).map(f => '<span>' + f[1] + ' ' + esc(f[2]) + '</span>').join('') + '</p>' +
+    '<ul class="nap__grid">' + rows.map((x, i) => '<li class="' + (x.bad.length ? 'bad' : '') + '" style="--i:' + i + '"><img class="pi" src="' + pfIcon(x.r.key) + '" alt=""><b>' + esc(x.r.name) + '</b>' + FIELDS.filter(f => x.r[f[0]] != null).map(f => '<span class="' + (x.r[f[0]] ? '' : 'x') + '">' + f[1] + (x.r[f[0]] ? '' : T.napDiff) + '</span>').join('') + '</li>').join('') + '</ul>' +
+    (M.demoBad ? '<p class="note">' + T.napDemo + '</p>' : '');
+}
+$('#pfseg').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; segSet($('#pfseg'), b.dataset.f, 'f'); chips(b.dataset.f, true); });
+
+/* ---------- 06 口碑 ---------- */
+function renderRep(){
+  const me = { name: T.you, rating: M.store.rating, reviews: M.store.review_count || 0, me: 1 }, rv = M.repRivals, sec = $('#r-rep'); sec.hidden = !rv.length || !me.rating; if (sec.hidden) return;
+  const byR = [me].concat(rv).sort((a, b) => b.rating - a.rating || (b.me || 0) - (a.me || 0)), topR = byR[0].rating, big = rv.slice().sort((a, b) => b.reviews - a.reviews)[0], maxN = Math.max(me.reviews, big.reviews), med = rv.map(r => r.reviews).sort((a, b) => a - b)[Math.floor(rv.length / 2)], x = big.reviews / (me.reviews || 1);
+  tySet($('#hRep'), me.reviews < med ? T.hRepFew : T.hRepOk); $('#lRep').textContent = T.lRep;
+  $('#rep').innerHTML = '<div class="rep__l"><h3>' + T.repStars + '</h3><ul class="rep__stars">' + byR.map(r => '<li class="' + (r.me ? 'me' : '') + '"><span' + (r.me && r.rating >= topR ? ' data-tag="' + T.repTop + '"' : '') + '>' + esc(r.name) + '</span><span class="stars" style="--v:' + (r.rating / 5 * 100).toFixed(1) + '%"><i>★★★★★</i><i>★★★★★</i></span><b>' + r.rating.toFixed(1) + '</b></li>').join('') + '</ul></div>' +
+    '<div class="rep__r"><h3>' + T.repCount + '</h3><div class="rep__cols" data-skb data-io>' + [me].concat(rv).sort((a, b) => a.reviews - b.reviews).map((r, i) => '<div class="col' + (r.me ? ' me' : '') + '" style="--h:' + Math.max(10, Math.round(r.reviews / maxN * 230)) + 'px;--i:' + i + '"><b data-to="' + r.reviews + '">0</b><i></i><span>' + esc(r.name) + '</span></div>').join('') + '</div><p class="rep__say rise d2">' + (x >= 1.5 ? t(T.repTimes, { x: x >= 10 ? Math.round(x) : String(Math.round(x * 10) / 10) }) : T.repLead) + '</p>' + (M.repSim ? '<p class="note">' + T.repSim + '</p>' : '') + '</div>';
+}
+
+/* ---------- 07 总结和下一步 ---------- */
+let proj = 0;
+function renderSum(){
+  const row = (x, i) => '<a href="#' + x.to + '" data-goto style="--i:' + i + '"><span><b>' + esc(x.title) + '</b><small>' + esc(x.line) + '</small></span>' + ARR + '</a>', bad = M.bad.slice(0, 4);
+  tySet($('#hSum'), bad.length ? t(T.hSum, { g: M.good.length, bad: bad.slice(0, 3).map(x => T['short'][x.key] || x.title).join('、') }) : T.hSumAllGood);
+  $('#sum').innerHTML = '<div class="rp-sumc"><h3><i>' + CHK + '</i>' + T.sumGood + '<span>' + t(T.sumN, { n: M.good.length }) + '</span></h3>' + M.good.map(row).join('') + '</div><div class="rp-sumc bad"><h3><i>' + BANG + '</i>' + T.sumBad + '<span>' + T.sumOrder + '</span></h3>' + (bad.length ? bad.map(row).join('') : '<p class="none">' + T.sumNone + '</p>') + '</div>';
+  /* 行动计划 */
+  const gain = M.actions.reduce((a, x) => a + x.gain, 0);
+  tySet($('#hNext'), gain ? t(T.hNext, { n: M.actions.length, to: Math.min(100, M.total + gain) }) : T.hNextKeep);
+  $('#acts').innerHTML = M.actions.map((a, i) => '<div class="rp-act' + (i ? '' : ' open') + '" data-a="' + i + '"><div class="rp-act__h" role="button" tabindex="0" aria-expanded="' + !i + '"><span class="rp-chk" role="checkbox" aria-checked="false" tabindex="0" aria-label="标为要做">' + CHK + '</span><h3>' + esc(a.title) + '</h3><span class="g">' + (a.gain ? t(T.gain, { n: a.gain }) : a.id === 'keep' ? T.keep : '') + '</span>' + CHEV + '</div><div class="rp-act__b"><div><div class="rp-act__in"><p><b>' + T.why + '</b>' + esc(a.see) + '</p><p><b>' + T.how + '</b>' + esc(a['do']) + '</p></div></div></div></div>').join('');
+  $$('#acts .rp-act').forEach(x => x.classList.remove('done')); proj = M.total; $('#projBase').style.width = M.total + '%'; $('#projBar').style.left = M.total + '%'; projUpdate(true);
+}
+function projUpdate(now){
+  const gain = $$('#acts .rp-act.done').reduce((a, x) => a + M.actions[+x.dataset.a].gain, 0), to = Math.min(100, M.total + gain), el = $('#projN'), from = proj, t0 = performance.now(), dur = now || RM ? 0 : 700; proj = to;
+  (function f(n){ const p = dur ? Math.min(1, (n - t0) / dur) : 1; el.innerHTML = Math.round(from + (to - from) * (1 - Math.pow(1 - p, 3))) + '<small>/ 100</small>'; if (p < 1) requestAnimationFrame(f); })(t0);
+  $('#projBar').style.width = (to - M.total) + '%';
+  $('#projFrom').innerHTML = gain ? t(T.projGain, { n: M.total, g: to - M.total }) : t(T.projNow, { n: M.total });
+}
+$('#acts').addEventListener('click', e => {
+  const ck = e.target.closest('.rp-chk'), card = e.target.closest('.rp-act'); if (!card) return;
+  if (ck){ const on = !card.classList.contains('done'); card.classList.toggle('done', on); ck.setAttribute('aria-checked', String(on)); projUpdate(); return; }
+  if (e.target.closest('.rp-act__h')){ const o = !card.classList.contains('open'); card.classList.toggle('open', o); card.querySelector('.rp-act__h').setAttribute('aria-expanded', String(o)); }
+});
+$('#acts').addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.rp-chk, .rp-act__h')){ e.preventDefault(); e.target.click(); } });
+
+/* ---------- 目录条 + 进入动画 + 数字跳动 + 提示框 ---------- */
+const RS = $$('.scn[data-rail]'), rail = $('#rail'), rhl = rail.querySelector('.hl');
+rail.insertAdjacentHTML('beforeend', RS.map(r => '<a href="#' + r.id + '"><i></i>' + r.dataset.rail + '</a>').join(''));
+const rLinks = $$('a', rail); let rCur = -1;
+function rSet(i){
+  if (i === rCur) return; rCur = i; rLinks.forEach((a, k) => a.classList.toggle('on', k === i));
+  const a = rLinks[i]; if (!a){ rhl.style.opacity = 0; return; } rhl.style.opacity = ''; rhl.style.width = a.offsetWidth + 'px'; rhl.style.transform = 'translateX(' + a.offsetLeft + 'px)';
+}
+function rSpy(){
+  if (view !== 'report') return; let i = -1; const line = innerHeight * .35;
+  RS.forEach((r, k) => { if (!r.hidden && r.getBoundingClientRect().top <= line) i = k; });
+  rSet(i);
+}
+addEventListener('scroll', rSpy, { passive: true });
+document.addEventListener('click', e => { const a = e.target.closest('#rail a, [data-goto]'); if (!a) return; e.preventDefault(); const el = document.getElementById(a.getAttribute('href').slice(1)); if (el) el.scrollIntoView({ behavior: RM ? 'auto' : 'smooth', block: 'start' }); });
+function sceneIn(s){ if (s.classList.contains('in')) return; s.classList.add('in'); $$('[data-io]', s).forEach(el => bio ? bio.observe(el) : blockIn(el)); $$('.ty', s).forEach(tyRun); countIn(s); if (s.id === 'r-ai') setTimeout(() => qShow(true), RM ? 0 : 700); }
+const rio = 'IntersectionObserver' in window ? new IntersectionObserver(es => es.forEach(en => { if (en.isIntersecting){ rio.unobserve(en.target); sceneIn(en.target); } }), { threshold: .06, rootMargin: '0px 0px -14% 0px' }) : null;
+function countIn(root){
+  $$('[data-count]', root || rpEl).forEach(el => { const to = +el.dataset.count, t0 = performance.now(), dur = RM ? 0 : 1400; (function f(now){ const p = dur ? Math.min(1, (now - t0) / dur) : 1; el.textContent = nf(Math.round(to * (1 - Math.pow(1 - p, 3)))); if (p < 1) requestAnimationFrame(f); })(t0); });
+}
+/* 一屏里靠下的小块（[data-to] 的数字）：滚到它自己才开始动，条和数字一起长 */
+function countTo(el, to, ms, delay){ if (RM){ el.textContent = nf(to); return; } setTimeout(() => { const t0 = performance.now(); (function f(now){ const p = Math.min(1, (now - t0) / ms); el.textContent = nf(Math.round(to * (1 - Math.pow(1 - p, 3)))); if (p < 1) requestAnimationFrame(f); })(t0); }, delay); }
+function blockIn(el){ el.classList.add('in'); $$('[data-to]', el).forEach((b, i) => countTo(b, +b.dataset.to, 1100, i * 90 + 200)); }
+const bio = 'IntersectionObserver' in window ? new IntersectionObserver(es => es.forEach(en => { if (en.isIntersecting){ bio.unobserve(en.target); blockIn(en.target); } }), { threshold: .35 }) : null;
+const tip = $('#rpTip');
+document.addEventListener('mouseover', e => { const el = e.target.closest && e.target.closest('[data-tip]'); if (!el) return; const r = el.getBoundingClientRect(); tip.innerHTML = el.dataset.tip; tip.style.left = Math.min(innerWidth - 160, Math.max(160, r.left + r.width / 2)) + 'px'; tip.style.top = r.top + 'px'; tip.classList.add('on'); });
+document.addEventListener('mouseout', e => { if (e.target.closest && e.target.closest('[data-tip]')) tip.classList.remove('on'); });
+addEventListener('scroll', () => tip.classList.remove('on'), { passive: true });
+function toast(msg){
+  let el = $('#toast'); if (!el){ el = document.createElement('div'); el.id = 'toast'; el.className = 'toast'; el.setAttribute('role', 'status'); document.body.appendChild(el); }
+  el.textContent = msg; el.classList.add('on'); clearTimeout(el._h); el._h = setTimeout(() => el.classList.remove('on'), 2400);
+}
+
+/* ---------- 加载：骨架照着真实排版画（每行字一条、每张卡一块），所以加载中和加载完是同一个结构 ---------- */
+let loadTok = 0;
+const setP = p => prog.firstElementChild.style.setProperty('--p', p);
+const ldUnits = k => $$(k ? '[data-ld="' + k + '"]' : '[data-ld]', rpEl).filter(u => !u.hidden);
+const TEXTY = /^(P|H1|H2|H3|H4|SPAN|SMALL|B|EM|STRONG|A|LABEL|TD|TH|BLOCKQUOTE|FIGCAPTION)$/;
+function skBuild(u){
+  const old = u.querySelector(':scope>.ld-sk'); if (old) old.remove();
+  const R = u.getBoundingClientRect(); if (R.width < 2 || R.height < 2) return;
+  let h = '';
+  const add = (l, tp, w, hh, rad) => { if (w >= 4 && hh >= 4) h += '<i class="sk" style="left:' + (l - R.left).toFixed(1) + 'px;top:' + (tp - R.top).toFixed(1) + 'px;width:' + w.toFixed(1) + 'px;height:' + hh.toFixed(1) + 'px;border-radius:' + rad + '"></i>'; };
+  const block = (cs, r) => add(r.left, r.top, r.width, r.height, parseFloat(cs.borderTopLeftRadius) >= 4 ? cs.borderTopLeftRadius : (Math.min(r.width, r.height) < 28 ? '6px' : '12px'));
+  const lines = (el, direct) => {   /* 一行字 = 一条 */
+    const box = el.getBoundingClientRect(), rg = document.createRange(), rs = [];
+    const nodes = direct ? [...el.childNodes].filter(n => n.nodeType === 3) : (() => { const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT), a = []; let n; while ((n = w.nextNode())) a.push(n); return a; })();
+    nodes.forEach(n => { if (!n.nodeValue.trim()) return; rg.selectNodeContents(n); [...rg.getClientRects()].forEach(r => { const l = Math.max(r.left, box.left, R.left), rt = Math.min(r.right, box.right, R.right); if (rt - l > 1 && r.height > 1) rs.push({ l, r: rt, t: r.top, b: r.bottom }); }); });
+    rs.sort((a, b) => a.t - b.t || a.l - b.l);
+    const out = [];
+    rs.forEach(r => { const cy = (r.t + r.b) / 2, o = out.find(o => Math.abs(o.cy - cy) < (o.b - o.t) * .45 && r.l - o.r < 28 && r.l >= o.l - 2); if (o){ o.r = Math.max(o.r, r.r); o.t = Math.min(o.t, r.t); o.b = Math.max(o.b, r.b); } else out.push({ l: r.l, r: r.r, t: r.t, b: r.b, cy }); });
+    out.forEach(o => { const bh = Math.max(8, Math.min((o.b - o.t) * .52, 44)); add(o.l, o.cy - bh / 2, o.r - o.l, bh, Math.min(8, bh / 2) + 'px'); });
+  };
+  const boxed = cs => (cs.backgroundColor !== 'rgba(0, 0, 0, 0)' && cs.backgroundColor !== 'transparent' && !/\/ 0\)$/.test(cs.backgroundColor)) || cs.backgroundImage !== 'none' || cs.boxShadow !== 'none';
+  const walk = (el, depth) => {
+    for (const c of el.children){
+      if (c.classList.contains('ld-sk') || c.hidden) continue;
+      const r = c.getBoundingClientRect(), m = c.dataset ? c.dataset.skb : undefined; if (m == null && (r.width < 2 || r.height < 2)) continue;
+      const cs = getComputedStyle(c);
+      if (m === 'text') lines(c);
+      else if (m != null) block(cs, r);
+      else if (c instanceof SVGElement){ if (r.width >= 28) block(cs, r); }
+      else if (TEXTY.test(c.tagName) && !(c.tagName === 'A' && c.classList.contains('btn'))) lines(c);
+      else if (boxed(cs)) block(cs, r);
+      else if (!c.children.length){ if (c.textContent.trim()) lines(c); else block(cs, r); }
+      else if (depth < 5){ lines(c, true); walk(c, depth + 1); }
+      else block(cs, r);
+    }
+  };
+  const self = u.dataset.skb;
+  if (self === 'text') lines(u); else if (self != null) add(R.left, R.top, R.width, R.height, 'inherit'); else walk(u, 1);
+  const ov = document.createElement('span'); ov.className = 'ld-sk'; ov.setAttribute('aria-hidden', 'true'); ov.innerHTML = h; u.appendChild(ov);
+}
+function ldPrep(){
+  ldUnits().forEach(u => { u.classList.remove('ld-go', 'in'); if (rio) rio.unobserve(u); u.classList.add('is-wait'); });
+  ldUnits().forEach(skBuild);
+  rLinks.forEach(a => a.classList.remove('run', 'ok'));
+  rpEl.classList.add('ld-run', 'waving'); document.body.classList.add('ld-run-top'); setWave(rpEl);
+}
+function ldOpen(u, now){
+  if (!u.classList.contains('is-wait')) return;
+  u.classList.remove('is-wait'); const ov = u.querySelector(':scope>.ld-sk');
+  if (now){ if (ov) ov.remove(); }
+  else { u.classList.add('ld-go'); setTimeout(() => u.classList.remove('ld-go'), 1100); if (ov){ ov.classList.add('off'); setTimeout(() => ov.remove(), 500); } }
+  if (u.classList.contains('scn')){ const a = rLinks[RS.indexOf(u)]; if (a){ a.classList.remove('run'); a.classList.add('ok'); } if (rio) rio.observe(u); else sceneIn(u); }
+}
+function ldShow(k, tok){ ldUnits(k).forEach((u, j) => setTimeout(() => { if (tok === loadTok) ldOpen(u); }, RM ? 0 : j * 140)); }
+function ldRun(k){ ldUnits(k).forEach(u => { const a = rLinks[RS.indexOf(u)]; if (a) a.classList.add('run'); }); }
+function ldClear(){ $$('.scn', rpEl).forEach(s => { s.classList.remove('in'); if (rio) rio.unobserve(s); }); ldUnits().forEach(u => { u.classList.add('is-wait'); ldOpen(u, true); }); rLinks.forEach(a => a.classList.remove('run', 'ok')); rpEl.classList.remove('ld-run', 'waving'); document.body.classList.remove('ld-run-top'); }
+function kSet(a, b){ const k = $('#rK'), w = $('#rWhen'); k.textContent = a; if (w.textContent !== b){ w.textContent = b; w.classList.remove('kin'); void w.offsetWidth; w.classList.add('kin'); } }
+/* 演示版的数据一次就读全了，所以这里按固定的节奏一屏一屏亮出来。
+   正式版数据是陆续回来的：哪一块到了，就调一次 ldShow('<那一块>')，其余不用改。 */
+async function runLoad(){
+  const tok = ++loadTok, alive = () => tok === loadTok, K = RM ? .15 : 1;
+  ldPrep(); kSet(T.kLoading, T.phaseFind);
+  prog.hidden = false; prog.classList.remove('done'); setP(.04);
+  await sleep(900 * K); if (!alive()) return;
+  ldShow('store', tok); ldShow('photo', tok); setP(.14);
+  ['rev', 'pf', 'map', 'ai', 'score'].forEach(ldRun); kSet(T.kLoading, T.phaseWork);
+  let got = 0; const N = M.asked || 1, step = Math.max(1, Math.round(N / 14));
+  const tick = setInterval(() => { if (!alive()) return clearInterval(tick); got = Math.min(N, got + step + Math.floor(Math.random() * step)); kSet(T.kLoading, t(T.phaseGot, { n: got })); setP(.18 + got / N * .72); if (got >= N) clearInterval(tick); }, 330 * K);
+  await sleep(1100 * K); if (!alive()) return; ldShow('rev', tok);
+  await sleep(1200 * K); if (!alive()) return; ldShow('pf', tok);
+  await sleep(1100 * K); if (!alive()) return; ldShow('map', tok);
+  await new Promise(r => { const w = () => (!alive() || got >= N) ? r() : setTimeout(w, 120); w(); }); if (!alive()) return;
+  ldShow('ai', tok); kSet(T.kLoading, T.phaseScore);
+  await sleep(1000 * K); if (!alive()) return; ldShow('score', tok);
+  await sleep(900 * K); if (!alive()) return;
+  setP(1); prog.classList.add('done'); rpEl.classList.remove('ld-run', 'waving'); document.body.classList.remove('ld-run-top'); kSet(T.kReport, dateZh(M.date)); rCur = -1; rSpy(); toast(T.ready);
+}
+
+/* ---------- 打开一份报告 ---------- */
+function renderAll(d){
+  M = build(d);
+  renderCover(); renderScore(); renderQA(); renderSrc(); renderMap(); renderPf(); renderRep(); renderSum();
+  const ps = $('#pfseg [aria-pressed="true"]'); if (ps) segSet($('#pfseg'), ps.dataset.f, 'f');
+}
+function showReport(d, loading){
+  renderAll(d); window.scrollTo(0, 0); rCur = -1; tyRun($('#rName'));
+  if (loading) runLoad(); else { loadTok++; prog.hidden = true; ldClear(); $$('.scn', rpEl).forEach(s => { if (rio) rio.observe(s); else sceneIn(s); }); kSet(T.kReport, dateZh(M.date)); }
+  requestAnimationFrame(rSpy);
+}
+
+/* ---------- 照片：点一下放大，左右键翻 ---------- */
+let lbI = 0, lbFrom = null;
+const lbList = () => phs.filter(b => !b.hidden);
+function lbShow(i){ const L = lbList(); lbI = (i + L.length) % L.length; const im = L[lbI].querySelector('img'); lbImg.src = im.src; lbImg.alt = im.alt; $('#lbN').textContent = (lbI + 1) + ' / ' + L.length + ' · 来自 Google'; lbImg.classList.remove('in'); void lbImg.offsetWidth; lbImg.classList.add('in'); }
+function lbOpen(i, from){ lbFrom = from; lb.hidden = false; lbShow(i); requestAnimationFrame(() => lb.classList.add('on')); lb.querySelector('.lb__x').focus(); }
+function lbClose(){ lb.classList.remove('on'); setTimeout(() => { lb.hidden = true; }, RM ? 0 : 300); if (lbFrom) lbFrom.focus(); }
+document.addEventListener('click', e => {
+  const p = e.target.closest('.rp-ph'); if (p && !p.classList.contains('is-wait')) return lbOpen(lbList().indexOf(p), p);
+  if (lb.hidden) return;
+  const b = e.target.closest('[data-lb]'); if (b) return b.dataset.lb === 'x' ? lbClose() : lbShow(lbI + +b.dataset.lb);
+  if (e.target === lb) lbClose();
+});
+document.addEventListener('keydown', e => { if (lb.hidden) return; if (e.key === 'Escape') lbClose(); else if (e.key === 'ArrowLeft') lbShow(lbI - 1); else if (e.key === 'ArrowRight') lbShow(lbI + 1); });
+
+/* =====================================================================
+   页面切换
+   ===================================================================== */
+/* 首页的大字：随滚动一个字一个字变深 */
+function lightPrep(h){
+  const walk = (node, cls) => [...node.childNodes].map(n => n.nodeType === 3 ? [...n.nodeValue].map(ch => '<span class="ch' + cls + '">' + (ch === ' ' ? '&nbsp;' : esc(ch)) + '</span>').join('') : walk(n, n.classList && n.classList.contains('r') ? ' r' : n.classList && n.classList.contains('a') ? ' a' : cls)).join('');
+  const tmp = document.createElement('div'); tmp.innerHTML = h.innerHTML; h.innerHTML = walk(tmp, ''); h._c = $$('.ch', h); h._k = -1;
+}
+function lightAll(){
+  $$('[data-light]').forEach(h => {
+    if (!h._c || !h.offsetParent) return; const r = h.getBoundingClientRect();
+    const p = RM ? 1 : Math.max(0, Math.min(1, (innerHeight * .92 - r.top) / (innerHeight * .4))), k = Math.round(p * h._c.length);
+    if (k !== h._k){ h._k = k; h._c.forEach((c, i) => c.classList.toggle('lit', i < k)); }
+  });
+}
+$$('[data-light]').forEach(lightPrep);
+const gio = 'IntersectionObserver' in window ? new IntersectionObserver(es => es.forEach(en => { if (en.isIntersecting){ en.target.classList.add('in'); gio.unobserve(en.target); } }), { threshold: .18 }) : null;
+$$('.gx').forEach(g => gio ? gio.observe(g) : g.classList.add('in'));
+
+function setHash(h){ try { history.replaceState(null, '', h || (location.pathname + location.search)); } catch (e) {} }
+function go(v){
+  view = v; $('#v-home').hidden = v !== 'home'; $('#v-report').hidden = v === 'home'; document.body.classList.toggle('is-report', v === 'report');
+  const sec = $(v === 'home' ? '#v-home' : '#v-report'); sec.classList.remove('view'); void sec.offsetWidth; sec.classList.add('view');
+  window.scrollTo(0, 0);
+}
+function goHome(){ loadTok++; openTok++; KEY = ''; prog.hidden = true; document.body.classList.remove('ld-run-top'); go('home'); setHash(''); showCard(0); arm(); chatLoop(); requestAnimationFrame(lightAll); }
+/* 读一家店的结果。后台还在跑（status 不是 done）就每 1.5 秒再读一次 */
+let openTok = 0;
+async function openKey(key, loading){
+  const tok = ++openTok; let d = await api('/api/result?key=' + encodeURIComponent(key));
+  while (d && !d.error && d.status && !/^(done|error|not_found|choose)$/.test(d.status)){ await sleep(1500); if (tok !== openTok) return; d = await api('/api/result?key=' + encodeURIComponent(key)); }
+  if (tok !== openTok) return;
+  if (!d || d.error || d.status !== 'done' || !d.store) throw { error: T.notFound };
+  d.key = d.key || key; d.asked_on = d.asked_on || String(d.updated_at || '').slice(0, 10);
+  if (/[?&]demo=bad\b/.test(location.search)){ const rs = (((d.platforms || {}).rows) || []).filter(r => !r.base); const a = rs.filter(r => r.phone_ok === true)[0], b = rs.filter(r => r.addr_ok === true && r !== a)[0]; if (a) a.phone_ok = false; if (b) b.addr_ok = false; d._demoBad = true; }
+  stopChat(); clearInterval(timer); KEY = key; go('report'); setHash('#k=' + encodeURIComponent(key)); showReport(d, loading && !STATIC);
+}
+function hintReset(){ const h = $('#hint'); h.className = 'hint'; h.innerHTML = '<span>免费</span><span>约 1 分钟</span><span>只替你问，不改你的任何资料</span>'; }
+function hintErr(msg){ const h = $('#hint'); h.className = 'hint err'; h.textContent = msg; }
+const askBtn = $('#ask .btn'), askHtml = askBtn.innerHTML;
+function busy(on){ askBtn.disabled = on; askBtn.innerHTML = on ? '正在查…' : askHtml; }
+$('#ask').addEventListener('submit', async e => {
+  e.preventDefault(); const form = $('#ask'), v = input.value.trim();
+  if (!v){ form.classList.remove('shake'); void form.offsetWidth; form.classList.add('shake'); hintErr('先输入店名或官网，比如 baonoodlehouse.com'); input.focus(); return; }
+  busy(true);
+  try { const j = await api('/api/check', { url: v }); if (!j || j.error || !j.key) throw j || {}; await openKey(j.key, true); }
+  catch (err) { hintErr((err && err.error) || T.netFail); }
+  busy(false);
+});
+input.addEventListener('input', () => { if ($('#hint').classList.contains('err')) hintReset(); });
+document.addEventListener('click', e => {
+  const a = e.target.closest('#toDemo,#other,#toHow,#toGeo,#ctaBtn,#rCta,#rAgain'); if (!a) return;
+  e.preventDefault();
+  if (a.id === 'toGeo' || a.id === 'toHow'){ if (view !== 'home') goHome(); setTimeout(() => $(a.id === 'toGeo' ? '#geo' : '#how').scrollIntoView({ behavior: RM ? 'auto' : 'smooth', block: 'start' }), 60); return; }
+  if (a.id === 'ctaBtn'){ window.scrollTo({ top: 0, behavior: RM ? 'auto' : 'smooth' }); setTimeout(() => input.focus({ preventScroll: true }), RM ? 0 : 500); return; }
+  if (a.id === 'toDemo') return openKey(EX_KEY, true).catch(() => toast(T.netFail));
+  if (a.id === 'rCta') return toast(T.ctaToast);
+  if (a.id === 'other' || a.id === 'rAgain'){ goHome(); setTimeout(() => { input.value = ''; input.focus(); }, 80); }
+});
+addEventListener('scroll', () => { $('#top').classList.toggle('scrolled', scrollY > 8); if (view === 'home') lightAll(); }, { passive: true });
+addEventListener('resize', () => {
+  placeHL();
+  if (view !== 'report') return;
+  rCur = -1; rSpy(); const pf = $('#pfseg [aria-pressed="true"]'); if (pf) segSet($('#pfseg'), pf.dataset.f, 'f');
+  if (rpEl.classList.contains('ld-run')){ ldUnits().filter(u => u.classList.contains('is-wait')).forEach(skBuild); setWave(rpEl); }
+});
+/* 按网址决定先看哪一页：/#k=<店> 直接开报告，否则是首页 */
+function route(){
+  const m = /[#&]k=([^&]+)/.exec(location.hash), key = m ? decodeURIComponent(m[1]) : '';
+  if (key){ if (key !== KEY) openKey(key, true).catch(() => { goHome(); hintErr(T.notFound); }); }
+  else if (view !== 'home') goHome();
+}
+addEventListener('hashchange', route);
+(document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()).then(route);
 })();
