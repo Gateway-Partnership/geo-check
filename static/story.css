@@ -770,6 +770,25 @@ body.is-report .rail{display:block;margin-inline:auto;padding:5px;border-radius:
 @keyframes badGlow{50%{box-shadow:inset 0 0 0 1.5px var(--miss),0 10px 30px -8px rgba(181,54,29,.5)}}
 .nap__fix{display:flex;flex-direction:column;gap:6px;font-size:16px;font-weight:500}
 .nap__fix li{display:flex;align-items:baseline;gap:10px}
+/* 营业时间：一行一处不一样。左边是哪个平台、哪几天，中间是平台上写的，右边是 Google 上的 */
+.hrs{padding:24px 30px;gap:16px}
+.hrs .nap__h>i{width:36px;height:36px}
+.hrs .nap__h svg{width:18px;height:18px}
+.hrs .nap__h h3{font-size:clamp(19px,1.8vw,23px)}
+.hrs__k{display:inline-block;vertical-align:middle;margin-left:10px;font-family:var(--font);font-size:12px;font-weight:600;letter-spacing:0;padding:3px 10px;border-radius:999px;background:var(--surface);color:var(--muted);cursor:default}
+.hrs__list{display:flex;flex-direction:column;gap:8px}
+.hrs__list li{display:grid;grid-template-columns:170px 110px auto 18px auto;justify-content:start;gap:18px;align-items:center;padding:12px 16px;border-radius:18px;background:var(--surface);opacity:0;transform:translateY(8px);transition:opacity .5s var(--ease),transform .6s var(--ease);transition-delay:calc(var(--i) * 80ms + 300ms)}
+.scn.in .hrs__list li{opacity:1;transform:none}
+.hrs__n{display:flex;align-items:center;gap:10px;font-size:15.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hrs__n .pi{width:28px;height:28px;border-radius:8px;flex:none}
+.hrs__list b{font-size:15.5px;font-weight:600}
+.hrs__v{display:inline-flex;align-items:baseline;gap:8px;padding:6px 14px;border-radius:999px;font-size:15px;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap;background:var(--good-soft);color:var(--good)}
+.hrs__v small{font-size:12px;font-weight:500;opacity:.85}
+.hrs__v.x{background:var(--miss);color:#fff}
+.hrs__list svg{width:18px;height:18px;stroke:var(--muted);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.hrs__rest{display:flex;align-items:center;gap:6px;font-size:13.5px;color:var(--muted)}
+.hrs__rest .pi{width:20px;height:20px;border-radius:6px}
+.hrs__rest .pi:last-of-type{margin-right:6px}
 .nap__fix li::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--miss);flex:none;transform:translateY(-2px)}
 
 /* ---------- 06 口碑：左边星星比评分，右边圆圈比评价数（圆越大 = 评价越多） ---------- */

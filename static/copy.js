@@ -87,6 +87,16 @@ window.COPY = {
   napFix: '去 {name} 把{what}改成和 Google 一样：{right}',
   napRef: '以 Google 上的为准',
   napPhone: '电话', napAddr: '地址', napHours: '营业时间', napDiff: '不一样',
+  /* 05 下半：营业时间对照 */
+  days: [['Monday', '周一'], ['Tuesday', '周二'], ['Wednesday', '周三'], ['Thursday', '周四'], ['Friday', '周五'], ['Saturday', '周六'], ['Sunday', '周日']],
+  hrsOkH: '营业时间：核对了 {n} 个平台，都和 Google 上一样。',
+  hrsBadH: '营业时间有 {n} 处，和 Google 上不一样。',
+  hrsBadP: '客人照着平台上的时间来，可能扑空。去平台上改成和 Google 一样。',
+  hrsOn: '平台上写', hrsG: 'Google 上是',
+  hrsRest: '其余 {n} 个平台和 Google 一样',
+  hrsClosed: '休息', hrs24: '24 小时',
+  hrsSample: '示例数据',
+  hrsSampleNote: '后台现在只核对了电话和地址，还没有营业时间。这里先用示例数据演示，不是这家店的真实结果。',
   napDemo: '这是「资料对不上」的示例样子（网址里带了 ?demo=bad），不是这家店的真实结果。',
 
   /* 06 口碑 */

@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="/static/story.css">
+<link rel="stylesheet" href="/static/story.css?v=6">
 </head>
 <body>
 <header class="top" id="top">
@@ -288,6 +288,8 @@
           <div class="rp-chips" id="chips"></div>
           <!-- 资料核对：各平台上的电话、地址（以后还有营业时间）和 Google 上一不一样 -->
           <div class="nap rise" id="nap"></div>
+          <!-- 营业时间对照：一行一个平台，一列一天。和 Google 不一样的那一格标红 -->
+          <div class="nap hrs rise d2" id="hrs"></div>
         </div>
       </section>
 
@@ -350,7 +352,8 @@
 </div>
 
 <noscript><p style="padding:24px;text-align:center">这一页要打开 JavaScript 才能用。</p></noscript>
-<script src="/static/copy.js" defer></script>
-<script src="/static/story.js" defer></script>
+<script src="/static/copy.js?v=6" defer></script>
+<script src="/static/sample-hours.js?v=6" defer></script>
+<script src="/static/story.js?v=6" defer></script>
 </body>
 </html>

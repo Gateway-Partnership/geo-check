@@ -170,6 +170,14 @@ function build(d){
   const rp = d.rival_platforms || {}, rf = rp.found || {}, hasRival = !!rp.name;
   const pf = (((d.platforms || {}).rows) || []).filter(r => !r.error && (r.kind === 'page' || r.kind === 'mention')).map(r => ({ key: r.key, name: String(r.name).replace(' 地图', ' 地图'), sub: r.sub, domain: r.domain, cat: r.found ? 'y' : (!hasRival || rf[r.key]) ? 'x' : 'z' }));
   const nap = (((d.platforms || {}).rows) || []).filter(r => !r.error && !r.base && (r.phone_ok != null || r.addr_ok != null || r.hours_ok != null)).map(r => ({ key: r.key, name: r.name, phone_ok: r.phone_ok, addr_ok: r.addr_ok, hours_ok: r.hours_ok }));
+  /* 营业时间：Google 上的（store.hours）对比各平台上的。平台那一行有真实的 hours 就用真实的；
+     没有就用 static/sample-hours.js 里的示例（页面上会标「示例数据」）。网址加 ?hours=ok 可以看全对的样子。 */
+  const SH = (window.SAMPLE_HOURS || {})[d.key] || {}, toMap = a => { const o = {}; (a || []).forEach(x => { o[x.day] = hNorm(x.hours); }); return o; };
+  let hRef = toMap(st.hours), hSample = false; if (!Object.keys(hRef).length && SH.google){ hRef = {}; Object.keys(SH.google).forEach(k => { hRef[k] = hNorm(SH.google[k]); }); hSample = true; }
+  const hRows = !Object.keys(hRef).length ? [] : (((d.platforms || {}).rows) || []).filter(r => !r.error && !r.base && r.found).map(r => {
+    let days = null; if (r.hours && r.hours.length) days = toMap(r.hours); else if (SH.platforms && SH.platforms[r.key]){ hSample = true; days = Object.assign({}, hRef); if (!/[?&]hours=ok\b/.test(location.search)) Object.keys(SH.platforms[r.key]).forEach(k => { days[k] = hNorm(SH.platforms[r.key][k]); }); }
+    return days && { key: r.key, name: r.name, days, diff: T.days.filter(x => days[x[0]] != null && days[x[0]] !== hRef[x[0]]).map(x => x[0]) };
+  }).filter(Boolean);
   const pfN = { y: pf.filter(p => p.cat === 'y').length, x: pf.filter(p => p.cat === 'x').length, z: pf.filter(p => p.cat === 'z').length };
 
   /* 七个方面 → 做得好的 / 要改进的（带一句有数字的话） */
@@ -184,7 +192,7 @@ function build(d){
 
   const groups = (d.source_groups || []).slice(), own = groups.filter(g => g.kind === 'own')[0] || { count: 0, names: [] };
   return {
-    key: d.key, date: d.asked_on, store: st, total, nap, demoBad: !!d._demoBad, dim, dims, good, bad, qs, eng, asked, rec, rivals, repRivals, repSim, pf, pfN, rivalName: rp.name || '', actions,
+    key: d.key, date: d.asked_on, store: st, total, nap, demoBad: !!d._demoBad, hours: { ref: hRef, rows: hRows, sample: hSample }, dim, dims, good, bad, qs, eng, asked, rec, rivals, repRivals, repSim, pf, pfN, rivalName: rp.name || '', actions,
     photos: [por.photo].concat(por.photos || []).filter(Boolean).slice(0, 4), dishes: (por.dishes || []).slice(0, 3), quote: (por.quotes || [])[0],
     groups: groups.filter(g => g.kind !== 'own').sort((a, b) => b.count - a.count), own, srcTotal: groups.reduce((a, g) => a + (g.count || 0), 0), sites: (d.sites || []).slice(0, 8), grid: d.grid || null,
     verdict: total >= 76 ? T.verdictHigh : (st.rating >= 4.5 ? T.verdictLoved : T.verdictUnknown)
@@ -223,6 +231,7 @@ function renderCover(){
     (q ? '<blockquote class="cv__q">' + esc(q.text) + (q.zh ? '<small>' + esc(q.zh) + '</small>' : '') + '<cite>' + (q.rating >= 4 ? '<span>' + '★★★★★'.slice(0, Math.round(q.rating)) + '</span>' : '') + esc(q.author || '') + ' · Google 评价</cite></blockquote>' : '');
 }
 const phoneFmt = s => { const m = /^1?(\d{3})(\d{3})(\d{4})$/.exec(String(s || '').replace(/\D/g, '')); return m ? '(' + m[1] + ') ' + m[2] + '-' + m[3] : String(s || ''); };
+const hNorm = s => { s = String(s || '').replace(/[\u202f\u00a0]/g, ' ').trim(); if (/^closed$/i.test(s)) return T.hrsClosed; if (/24 hours/i.test(s)) return T.hrs24; return s.replace(/(\d{1,2})(?::(\d\d))?\s*(AM|PM)/gi, (_, h, m, ap) => { h = +h % 12 + (/pm/i.test(ap) ? 12 : 0); return (h < 10 ? '0' : '') + h + ':' + (m || '00'); }).replace(/\s*[–-]\s*/g, '–'); };
 const dateZh = s => { const m = /^(\d{4})-(\d\d)-(\d\d)/.exec(s || ''); return m ? m[1] + ' 年 ' + (+m[2]) + ' 月 ' + (+m[3]) + ' 日' : ''; };
 
 /* ---------- 01 得分 ---------- */
@@ -355,6 +364,18 @@ function renderPf(){
     '<p class="nap__ref"><img class="pi" src="' + ic('google') + '" alt="">' + T.napRef + FIELDS.filter(f => f[2]).map(f => '<span>' + f[1] + ' ' + esc(f[2]) + '</span>').join('') + '</p>' +
     '<ul class="nap__grid">' + rows.map((x, i) => '<li class="' + (x.bad.length ? 'bad' : '') + '" style="--i:' + i + '"><img class="pi" src="' + pfIcon(x.r.key) + '" alt=""><b>' + esc(x.r.name) + '</b>' + FIELDS.filter(f => x.r[f[0]] != null).map(f => '<span class="' + (x.r[f[0]] ? '' : 'x') + '">' + f[1] + (x.r[f[0]] ? '' : T.napDiff) + '</span>').join('') + '</li>').join('') + '</ul>' +
     (M.demoBad ? '<p class="note">' + T.napDemo + '</p>' : '');
+  /* 营业时间：只列出和 Google 不一样的地方，一样的平台用一句话带过 */
+  const HR = M.hours, hrs = $('#hrs'), dayZh = k => T.days.filter(x => x[0] === k)[0][1];
+  hrs.hidden = !HR.rows.length;
+  if (HR.rows.length){
+    /* 同一个平台上，写错成同一个时间、正确时间也相同的几天，合成一行：周五、周六 */
+    const lines = []; HR.rows.forEach(r => { const by = {}; r.diff.forEach(k => { const id = r.days[k] + '|' + HR.ref[k]; (by[id] = by[id] || { r, mine: r.days[k], right: HR.ref[k], days: [] }).days.push(dayZh(k)); }); Object.keys(by).forEach(id => lines.push(by[id])); });
+    const same = HR.rows.filter(r => !r.diff.length), nDiff = HR.rows.reduce((a, r) => a + r.diff.length, 0), tag = HR.sample ? '<span class="hrs__k" data-tip="' + esc(T.hrsSampleNote) + '">' + T.hrsSample + '</span>' : '';
+    hrs.className = 'nap hrs rise d2' + (nDiff ? ' bad' : '');
+    hrs.innerHTML = '<div class="nap__h"><i>' + (nDiff ? BANG : CHK) + '</i><div><h3>' + (nDiff ? t(T.hrsBadH, { n: nDiff }) : t(T.hrsOkH, { n: HR.rows.length })) + tag + '</h3>' + (nDiff ? '<p>' + T.hrsBadP + '</p>' : '') + '</div></div>' +
+      (nDiff ? '<ul class="hrs__list">' + lines.map((x, i) => '<li style="--i:' + i + '"><span class="hrs__n"><img class="pi" src="' + pfIcon(x.r.key) + '" alt="">' + esc(x.r.name) + '</span><b>' + x.days.join('、') + '</b><span class="hrs__v x"><small>' + T.hrsOn + '</small>' + esc(x.mine) + '</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 7l5 5-5 5"/></svg><span class="hrs__v"><small>' + T.hrsG + '</small>' + esc(x.right) + '</span></li>').join('') + '</ul>' : '') +
+      (nDiff && same.length ? '<p class="hrs__rest">' + same.slice(0, 6).map(r => '<img class="pi" src="' + pfIcon(r.key) + '" alt="' + esc(r.name) + '">').join('') + t(T.hrsRest, { n: same.length }) + '</p>' : '');
+  }
 }
 $('#pfseg').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; segSet($('#pfseg'), b.dataset.f, 'f'); chips(b.dataset.f, true); });
 
@@ -404,6 +425,8 @@ function rSpy(){
   if (view !== 'report') return; let i = -1; const line = innerHeight * .35;
   RS.forEach((r, k) => { if (!r.hidden && r.getBoundingClientRect().top <= line) i = k; });
   rSet(i);
+  /* 保险：万一有一屏已经在眼前、却还没亮起来（比如直接跳到它中间），这里补一次 */
+  $$('.scn', rpEl).forEach(sc => { if (sc.hidden || sc.classList.contains('in') || sc.classList.contains('is-wait')) return; const r = sc.getBoundingClientRect(); if (r.top < innerHeight * .86 && r.bottom > 0) sceneIn(sc); });
 }
 addEventListener('scroll', rSpy, { passive: true });
 document.addEventListener('click', e => { const a = e.target.closest('#rail a, [data-goto]'); if (!a) return; e.preventDefault(); const el = document.getElementById(a.getAttribute('href').slice(1)); if (el) el.scrollIntoView({ behavior: RM ? 'auto' : 'smooth', block: 'start' }); });
