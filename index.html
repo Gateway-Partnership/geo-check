@@ -9,15 +9,17 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="/static/story.css?v=6">
+<link rel="stylesheet" href="/static/story.css?v=13">
 </head>
 <body>
 <header class="top" id="top">
   <div class="wrap top__in">
     <div class="brand"><i aria-hidden="true"></i>GEO Check</div>
-    <a href="#geo" class="hide-s" id="toGeo">什么是 GEO</a>
-    <a href="#how" class="hide-s" id="toHow">报告里有什么</a>
-    <a href="#loading" class="pill" id="toDemo">看示例报告</a>
+    <nav class="top__nav glass" aria-label="首页导航">
+      <a href="#geo" class="hide-s" id="toGeo">什么是 GEO</a>
+      <a href="#how" class="hide-s" id="toHow">报告里有什么</a>
+      <a href="#loading" class="pill" id="toDemo">看示例报告</a>
+    </nav>
     <!-- 下面两个只在报告页出现：目录条（加载时也是进度）和「换一家店」 -->
     <nav class="rail glass" aria-label="报告目录"><div class="rail__in" id="rail"><span class="hl" aria-hidden="true"></span></div></nav>
     <button type="button" class="ghost glass" id="other">换一家店</button>
@@ -28,17 +30,20 @@
 <main id="app">
   <!-- 首页 -->
   <section class="view" id="v-home">
+    <div class="aura" aria-hidden="true"><i></i><i></i><i></i><b></b></div>
     <div class="wrap hero">
       <div class="hero__copy">
         <p class="kicker">给餐厅老板的 AI 曝光检查</p>
         <h1><span class="nw">客人问 AI</span><span class="nw">「附近哪家好吃」，</span><span class="soft"><span class="nw">AI 会说出</span><span class="nw">你的店名吗？</span></span></h1>
-        <p class="lead">输入店名或官网。我们替你问 <b>30+ 次 AI</b>，查 <b>15+ 个平台</b>，在你店周围 <b>9 个路口</b>搜地图，1 分钟后告诉你差在哪。</p>
+        <p class="lead">输入店名或官网，一分钟后告诉你：<b>AI 推不推荐你，差在哪，先改什么</b>。</p>
         <form class="ask" id="ask" novalidate>
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg>
           <input id="q" type="text" autocomplete="off" spellcheck="false" placeholder="店名或官网，比如 baonoodlehouse.com" aria-label="店名或官网">
           <button class="btn" type="submit">查我的店<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 7l5 5-5 5"/></svg></button>
         </form>
         <p class="hint" id="hint" aria-live="polite"><span>免费</span><span>约 1 分钟</span><span>只替你问，不改你的任何资料</span></p>
+        <!-- 演示版带了两家测好的店，点一下直接看它的报告 -->
+        <p class="tries"><span>试试这两家</span><button type="button" data-try="baonoodlehouse.com">Bao Noodle House</button><button type="button" data-try="easyjoybuffet.com">Easy Joy</button></p>
       </div>
 
       <div class="chat" id="chat" aria-label="示例：客人正在问 AI 去哪吃">
@@ -60,6 +65,22 @@
         <p class="gloss" id="gloss"></p>
       </div>
     </div>
+
+    <!-- 我们替你做的三件事：数字滚到眼前才跳 -->
+    <section class="wrap how3" data-rv aria-label="我们替你做的三件事">
+      <a class="how3__c" href="#how" data-jump style="--i:0">
+        <i><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3c.5 4.2 2.8 6.5 7 7-4.2.5-6.5 2.8-7 7-.5-4.2-2.8-6.5-7-7 4.2-.5 6.5-2.8 7-7z"/></svg></i>
+        <p><b data-to="30">0</b><small>+ 次</small></p><h3>替你问 AI</h3><span>ChatGPT 和 Google AI，同一个问题各问好几遍</span>
+      </a>
+      <a class="how3__c" href="#how" data-jump style="--i:1">
+        <i><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="7" height="7" rx="2"/><rect x="13" y="4" width="7" height="7" rx="2"/><rect x="4" y="13" width="7" height="7" rx="2"/><rect x="13" y="13" width="7" height="7" rx="2"/></svg></i>
+        <p><b data-to="15">0</b><small>+ 个</small></p><h3>替你查平台</h3><span>点评、外卖、社交、美食媒体，有没有你、写得对不对</span>
+      </a>
+      <a class="how3__c" href="#how" data-jump style="--i:2">
+        <i><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s7-6.2 7-11.5A7 7 0 0 0 5 9.5C5 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg></i>
+        <p><b data-to="9">0</b><small>个路口</small></p><h3>替你搜地图</h3><span>站在你店周围的路口，各搜一次，看你排第几</span>
+      </a>
+    </section>
 
     <section class="wrap gx" id="geo">
       <p class="gx-k">什么是 GEO</p>
@@ -102,7 +123,7 @@
       </div>
     </section>
 
-    <div class="wrap band">
+    <div class="wrap band" data-rv>
       <h2>替你查这 30+ 个地方</h2>
       <p>点评、外卖、社交、美食媒体。AI 回答之前，也是先看这些。</p>
     </div>
@@ -113,7 +134,7 @@
 
     <div class="wrap">
       <section class="show" id="how">
-        <div class="show__head">
+        <div class="show__head" data-rv>
           <h2><span class="nw">1 分钟后，</span><span class="nw">你会拿到一份这样的报告</span></h2>
           <p>一份报告 7 个部分，一分钟看完，每一部分都拿你和附近的对手比。</p>
         </div>
@@ -133,29 +154,35 @@
           <div class="stage">
             <article class="card" id="card-0" role="tabpanel" aria-labelledby="ti-0"><div class="card__in">
               <div class="card__h"><h3>你的得分</h3><span>示例</span></div>
-              <div class="c-score">
-                <div class="ring"><svg viewBox="0 0 104 104" aria-hidden="true"><circle class="r0" cx="52" cy="52" r="46"/><circle class="r1" cx="52" cy="52" r="46"/></svg><p><b>52</b><small>/ 100</small></p></div>
-                <div><p class="c-big">52 分<span class="band-tag">一般</span></p><p class="c-sub">7 个方面综合打分，下面是丢分最多的三项</p></div>
+              <div class="c-sc">
+                <div>
+                  <p class="c-sc__n"><b>52</b><span>/ 100</span><em>一般</em></p>
+                  <div class="c-rule" style="--p:52%"><i class="z1"></i><i class="z2"></i><i class="z3"></i><b></b></div>
+                  <p class="c-rule__ax"><span>要抓紧</span><span>一般</span><span>不错</span></p>
+                </div>
+                <ul class="c-pts">
+                  <li class="ok" style="--i:0">Google 评分 4.8，888 条评价</li>
+                  <li class="no" style="--i:1">11 个美食媒体和论坛，8 个没写到你</li>
+                  <li class="no" style="--i:2">你的官网，AI 一次都没用上</li>
+                </ul>
               </div>
-              <ul class="lost">
-                <li style="--i:0"><span>媒体和论坛很少提到你</span><i><b style="--w:27%"></b></i><em>27</em></li>
-                <li style="--i:1"><span>你的官网，AI 读不到</span><i><b style="--w:30%"></b></i><em>30</em></li>
-                <li style="--i:2"><span>AI 很少推荐你</span><i><b style="--w:31%"></b></i><em>31</em></li>
-              </ul>
-              <div class="c-next">
-                <p class="c-ok"><span>Google 评分 4.8</span><span>各平台电话地址都对得上</span></p>
-                <div class="c-proj"><span>先做 3 件事，预计</span><i><b></b><em></em></i><strong>70 分</strong></div>
+              <div class="c-vit">
+                <div><b>10<small>/ 32</small></b><span>次提问，AI 推荐了你</span></div>
+                <div><b>4<small>/ 9</small></b><span>个路口排进地图前 3</span></div>
+                <div><b>14<small>/ 30</small></b><span>个平台和媒体上有你</span></div>
+                <div><b>4.8<small>分</small></b><span>888 条 Google 评价</span></div>
               </div>
             </div></article>
             <article class="card" id="card-1" role="tabpanel" aria-labelledby="ti-1"><div class="card__in">
               <div class="card__h"><h3>AI 怎么说</h3><span>示例</span></div>
               <p class="c-big">32 次提问里，AI 推荐你<b>10</b>次</p>
-              <div class="p-bars">
-                <div style="--i:0"><span>Shanghai 21</span><i style="--w:100%"></i><b>16</b></div>
-                <div style="--i:1"><span>Deluxe Green Bo</span><i style="--w:94%"></i><b>15</b></div>
-                <div style="--i:2"><span>Joe’s Shanghai</span><i style="--w:81%"></i><b>13</b></div>
-                <div class="me" style="--i:3"><span>你的店</span><i style="--w:62%"></i><b>10</b></div>
-              </div>
+              <ul class="c-qs">
+                <li style="--i:0"><span>唐人街哪家的汤包最好</span><i><img class="pi" data-pf="chatgpt" alt="ChatGPT"><u></u><u></u></i><i><img class="pi" data-pf="google" alt="Google AI"><u class="y"></u><u class="y"></u></i><em>2 / 4</em></li>
+                <li style="--i:1"><span>唐人街哪家的花生拌面最好</span><i><img class="pi" data-pf="chatgpt" alt="ChatGPT"><u></u><u></u></i><i><img class="pi" data-pf="google" alt="Google AI"><u class="y"></u><u class="y"></u></i><em>2 / 4</em></li>
+                <li style="--i:2"><span>我附近的饺子</span><i><img class="pi" data-pf="chatgpt" alt="ChatGPT"><u></u><u></u></i><i><img class="pi" data-pf="google" alt="Google AI"><u></u><u></u></i><em class="zero">0 / 4</em></li>
+                <li style="--i:3"><span>全纽约哪家的汤包最好</span><i><img class="pi" data-pf="chatgpt" alt="ChatGPT"><u></u><u></u></i><i><img class="pi" data-pf="google" alt="Google AI"><u></u><u></u></i><em class="zero">0 / 4</em></li>
+              </ul>
+              <p class="c-note">每个点是一次提问，橙色的点是 AI 推荐了你。完整报告里可以点开看 AI 当时怎么回答。</p>
             </div></article>
             <article class="card" id="card-2" role="tabpanel" aria-labelledby="ti-2"><div class="card__in">
               <div class="card__h"><h3>AI 看哪些网站</h3><span>示例</span></div>
@@ -205,10 +232,11 @@
         </div>
       </section>
 
-      <section class="cta">
+      <section class="cta" data-rv>
         <h2>看看 AI 会不会推荐你的店</h2>
         <p>免费，约 1 分钟，不改你的任何资料。</p>
         <button type="button" class="btn" id="ctaBtn">查我的店<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 7l5 5-5 5"/></svg></button>
+        <p class="tries tries--dark"><span>或者先看看这两家</span><button type="button" data-try="baonoodlehouse.com">Bao Noodle House</button><button type="button" data-try="easyjoybuffet.com">Easy Joy</button></p>
       </section>
       <footer class="foot"><span>GEO Check</span><span>只替你问 AI，不改你的任何资料。</span></footer>
     </div>
@@ -219,6 +247,7 @@
   <section class="view" id="v-report" hidden>
     <div class="rp" id="rp">
       <!-- 封面：先让老板看见自己的店。左边店名和客人常提的菜，右边一张大照片 + 三张小照片 -->
+      <div class="cv-stage">
       <header class="cv" id="r-cover">
         <div class="wrap">
           <div class="cv__l">
@@ -249,6 +278,8 @@
         </div>
       </section>
 
+      </div>
+
       <section class="scn scn--sand" id="r-ai" data-ld="ai" data-rail="AI 怎么说">
         <div class="wrap">
           <div class="scn__h"><p class="scn__k"><b>2</b>客人问 AI，AI 怎么说</p><h2 class="ty" id="hAi"></h2><p class="scn__lead" id="lAi"></p></div>
@@ -274,7 +305,7 @@
             <div class="rp-mside rise">
               <div class="rp-cell" id="rcell" aria-live="polite"></div>
               <p class="rp-legend"><span><i class="t"></i>前 3 名</span><span><i class="m"></i>第 4–10 名</span><span><i class="o"></i>10 名以后</span></p>
-              <p class="note">点地图上的圆圈，看那个路口的前 3 名。</p>
+              <p class="note">把鼠标放在地图的圆圈上，看那个路口的前 3 名。</p>
             </div>
           </div>
         </div>
@@ -352,8 +383,8 @@
 </div>
 
 <noscript><p style="padding:24px;text-align:center">这一页要打开 JavaScript 才能用。</p></noscript>
-<script src="/static/copy.js?v=6" defer></script>
-<script src="/static/sample-hours.js?v=6" defer></script>
-<script src="/static/story.js?v=6" defer></script>
+<script src="/static/copy.js?v=13" defer></script>
+<script src="/static/sample-hours.js?v=13" defer></script>
+<script src="/static/story.js?v=13" defer></script>
 </body>
 </html>

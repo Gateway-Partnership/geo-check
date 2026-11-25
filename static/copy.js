@@ -38,7 +38,7 @@ window.COPY = {
   qcYes: '推荐了你 · 排第 {pos}',
   qcNo: '没提到你',
   qcMiss: '名单里没有你',
-  qcMore: '还有 {n} 家',
+  qcMore: '…',
   qcSrc: '它看了：',
   qcNoSrc: '这次没有列出它看了哪些网站',
   qcNth: '第 {r} 次回答，共 {n} 次',

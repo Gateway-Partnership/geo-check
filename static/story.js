@@ -219,6 +219,19 @@ async function tyRun(h){
 
 /* ---------- 封面 ---------- */
 const phs = $$('.rp-ph'), lb = $('#lb'), lbImg = $('#lbImg');
+/* 封面钉在原地，得分那一屏滑上来盖住它；往下滚的时候封面稍微缩小、变淡 */
+const cv = $('#r-cover'); let cvH = 1;
+function cvFit(){ cvH = cv.offsetHeight || 1; cv.style.setProperty('--cv-top', Math.min(0, innerHeight - cvH) + 'px'); cvScroll(); }
+function cvScroll(){ if (view !== 'report' || RM) return; cv.style.setProperty('--cvp', Math.max(0, Math.min(1, scrollY / (cvH * .85))).toFixed(3)); }
+addEventListener('scroll', cvScroll, { passive: true }); addEventListener('resize', cvFit);
+/* 大照片跟着鼠标微微倾斜，高光也跟着走；小照片和评分反方向动一点，有前后层次 */
+const cvR = $('.cv__r');
+if (!RM){
+  cvR.addEventListener('mousemove', e => { const r = cvR.getBoundingClientRect(), x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height; cvR.style.setProperty('--ry', ((x - .5) * 9).toFixed(2)); cvR.style.setProperty('--rx', ((.5 - y) * 7).toFixed(2)); cvR.style.setProperty('--gx', (x * 100).toFixed(1) + '%'); cvR.style.setProperty('--gy', (y * 100).toFixed(1) + '%'); cvR.style.setProperty('--go', 1); });
+  cvR.addEventListener('mouseleave', () => { ['--ry', '--rx'].forEach(k => cvR.style.setProperty(k, 0)); cvR.style.setProperty('--go', 0); });
+  /* 深色屏和橙色屏：一团光跟着鼠标走 */
+  $$('.scn--deep, .scn--orange').forEach(s => s.addEventListener('mousemove', e => { const r = s.getBoundingClientRect(); s.style.setProperty('--mx', (e.clientX - r.left).toFixed(0) + 'px'); s.style.setProperty('--my', (e.clientY - r.top).toFixed(0) + 'px'); }));
+}
 function renderCover(){
   const s = M.store, h = $('#rName'), PIN = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s7-6.2 7-11.5A7 7 0 0 0 5 9.5C5 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>';
   h.classList.toggle('long', String(s.name).length > 22); tySet(h, esc(s.name));
@@ -243,10 +256,10 @@ function renderScore(){
     '<div class="sc__r"><ul class="sc__pts">' + pts.map((p, i) => '<li class="' + p[0] + '" style="--i:' + i + '"><i>' + (p[0] === 'ok' ? CHK : BANG) + '</i><span>' + esc(p[1]) + '</span></li>').join('') + '</ul><a class="btn rise d3" href="#r-plan" data-goto>' + T.toPlan + GO + '</a></div>';
   const g = M.grid, cells = (g && g.cells) || [], top3 = cells.filter(c => c.rank && c.rank <= 3).length, n20 = M.asked ? Math.round(M.rec / M.asked * 20) : 0, logos = M.pf.filter(p => p.cat === 'y').slice(0, 7);
   $('#vit').innerHTML =
-    '<a href="#r-ai" data-goto><div class="vit__g"><div class="vg-dots">' + Array.from({ length: 20 }, (_, i) => '<i class="' + (i < n20 ? 'y' : '') + '" style="--i:' + i + '"></i>').join('') + '</div></div><p>' + M.rec + '<small>/ ' + M.asked + '</small></p><span>次提问，AI 推荐了你</span>' + ARR + '</a>' +
-    '<a href="#r-map" data-goto><div class="vit__g"><div class="vg-grid">' + cells.map((c, i) => '<i class="' + (!c.rank ? '' : c.rank <= 3 ? 't' : c.rank <= 10 ? 'm' : '') + '" style="--i:' + (i + 6) + '"></i>').join('') + '</div></div><p>' + top3 + '<small>/ ' + cells.length + '</small></p><span>个路口排进地图前 3</span>' + ARR + '</a>' +
-    '<a href="#r-pf" data-goto><div class="vit__g"><div class="vg-logos">' + logos.map(p => '<img src="' + pfIcon(p.key) + '" alt="">').join('') + '</div></div><p>' + M.pfN.y + '<small>/ ' + M.pf.length + '</small></p><span>个平台和媒体上有你</span>' + ARR + '</a>' +
-    '<a href="#r-rep" data-goto><div class="vit__g"><span class="stars" style="--v:' + (M.store.rating / 5 * 100).toFixed(1) + '%"><i>★★★★★</i><i>★★★★★</i></span></div><p>' + esc(M.store.rating) + '<small>分</small></p><span>' + nf(M.store.review_count) + ' 条 Google 评价</span>' + ARR + '</a>';
+    '<a href="#r-ai" data-goto style="--k:0"><div class="vit__g"><div class="vg-dots">' + Array.from({ length: 20 }, (_, i) => '<i class="' + (i < n20 ? 'y' : '') + '" style="--i:' + i + '"></i>').join('') + '</div></div><p>' + M.rec + '<small>/ ' + M.asked + '</small></p><span>次提问，AI 推荐了你</span>' + ARR + '</a>' +
+    '<a href="#r-map" data-goto style="--k:1"><div class="vit__g"><div class="vg-grid">' + cells.map((c, i) => '<i class="' + (!c.rank ? '' : c.rank <= 3 ? 't' : c.rank <= 10 ? 'm' : '') + '" style="--i:' + (i + 6) + '"></i>').join('') + '</div></div><p>' + top3 + '<small>/ ' + cells.length + '</small></p><span>个路口排进地图前 3</span>' + ARR + '</a>' +
+    '<a href="#r-pf" data-goto style="--k:2"><div class="vit__g"><div class="vg-logos">' + logos.map(p => '<img src="' + pfIcon(p.key) + '" alt="">').join('') + '</div></div><p>' + M.pfN.y + '<small>/ ' + M.pf.length + '</small></p><span>个平台和媒体上有你</span>' + ARR + '</a>' +
+    '<a href="#r-rep" data-goto style="--k:3"><div class="vit__g"><span class="stars" style="--v:' + (M.store.rating / 5 * 100).toFixed(1) + '%"><i>★★★★★</i><i>★★★★★</i></span></div><p>' + esc(M.store.rating) + '<small>分</small></p><span>' + nf(M.store.review_count) + ' 条 Google 评价</span>' + ARR + '</a>';
 }
 
 /* ---------- 02 AI 怎么说：问题 + 点阵 + 重放回答 ---------- */
@@ -283,7 +296,17 @@ async function qShow(anim){
   await sleep(260); if (tok !== qTok) return;
   for (const li of lis){ li.classList.add('on'); await sleep(90); if (tok !== qTok) return; }
 }
+/* 自动轮播：选中那一行底下的进度条走完，就换到下一题（只在前 5 题里转）。鼠标放上去暂停，点一下就停 */
+let qAutoTok = 0;
+function qNext(tok){
+  const qa = $('#qa'); if (tok !== qAutoTok || !qa.classList.contains('auto')) return;
+  const r = qa.getBoundingClientRect(); if (document.hidden || r.bottom < 0 || r.top > innerHeight){ setTimeout(() => qNext(tok), 1500); return; }
+  qSel = qPick((qSel.q + 1) % Math.min(5, M.qs.length)); qShow(true);
+}
+function qAuto(on){ qAutoTok++; $('#qa').classList.toggle('auto', !!on && !RM && M.qs.length > 1); }
+$('#qa').addEventListener('animationend', e => { if (e.animationName === 'qProg') qNext(qAutoTok); });
 $('#qa').addEventListener('click', e => {
+  qAuto(false);
   const more = e.target.closest('#qaMore'); if (more){ const on = $('#qa').classList.toggle('all'); more.textContent = on ? T.qaLess : t(T.qaAll, { n: M.qs.length }); return; }
   const dot = e.target.closest('.dots i'), b = e.target.closest('#qlist button'); if (!b) return;
   qSel = dot ? { q: +b.dataset.q, e: +dot.dataset.e, r: +dot.dataset.r } : qPick(+b.dataset.q); qShow(true);
@@ -338,10 +361,12 @@ function renderMap(){
     if (!anim){ el.innerHTML = body; return; }
     el.classList.add('swap'); setTimeout(() => { el.innerHTML = body; el.classList.remove('swap'); }, 200);
   };
-  mapCell(home, false);
+  mapCell(home, false); m.classList.remove('ready');
   tySet($('#hMap'), top3 === n ? t(T.hMapAll, { n }) : t(T.hMapSome, { n, out: n - top3 })); $('#lMap').textContent = t(T.lMap, { n, kw: g.keyword || '' });
 }
-$('#rmap').addEventListener('click', e => { const b = e.target.closest('.rp-pt'); if (!b) return; $$('#rmap .rp-pt').forEach(x => x.classList.toggle('sel', x === b)); mapCell(+b.dataset.c, true); });
+function mapPick(e){ const b = e.target.closest('.rp-pt'); if (!b || b.classList.contains('sel')) return; $$('#rmap .rp-pt').forEach(x => x.classList.toggle('sel', x === b)); mapCell(+b.dataset.c, true); }
+$('#rmap').addEventListener('click', mapPick); $('#rmap').addEventListener('mouseover', mapPick);
+$('#rmap').addEventListener('mouseenter', () => $('#rmap').classList.add('ready'));   /* 鼠标一进地图，就不再等出场动画 */
 
 /* ---------- 05 平台 ---------- */
 function chips(f, anim){
@@ -406,9 +431,15 @@ function projUpdate(now){
   $('#projBar').style.width = (to - M.total) + '%';
   $('#projFrom').innerHTML = gain ? t(T.projGain, { n: M.total, g: to - M.total }) : t(T.projNow, { n: M.total });
 }
+function flyGain(from, n){
+  const to = $('#projN'); if (RM || !n || !from.animate) return;
+  const a = from.getBoundingClientRect(), b = to.getBoundingClientRect(), el = document.createElement('span'); el.className = 'fly'; el.textContent = '+' + n; document.body.appendChild(el);
+  el.animate([{ transform: 'translate(' + a.left + 'px,' + (a.top - 6) + 'px) scale(1)', opacity: 1 }, { transform: 'translate(' + (a.left + (b.left + b.width * .3 - a.left) * .5) + 'px,' + (Math.min(a.top, b.top) - 40) + 'px) scale(1.5)', opacity: 1, offset: .55 }, { transform: 'translate(' + (b.left + b.width * .3) + 'px,' + (b.top + b.height * .3) + 'px) scale(.8)', opacity: 0 }], { duration: 850, easing: 'cubic-bezier(.3,.6,.2,1)' }).onfinish = () => el.remove();
+  to.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.09)' }, { transform: 'scale(1)' }], { duration: 620, delay: 560, easing: 'ease-out' });
+}
 $('#acts').addEventListener('click', e => {
   const ck = e.target.closest('.rp-chk'), card = e.target.closest('.rp-act'); if (!card) return;
-  if (ck){ const on = !card.classList.contains('done'); card.classList.toggle('done', on); ck.setAttribute('aria-checked', String(on)); projUpdate(); return; }
+  if (ck){ const on = !card.classList.contains('done'); card.classList.toggle('done', on); ck.setAttribute('aria-checked', String(on)); if (on) flyGain(ck, M.actions[+card.dataset.a].gain); projUpdate(); return; }
   if (e.target.closest('.rp-act__h')){ const o = !card.classList.contains('open'); card.classList.toggle('open', o); card.querySelector('.rp-act__h').setAttribute('aria-expanded', String(o)); }
 });
 $('#acts').addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.rp-chk, .rp-act__h')){ e.preventDefault(); e.target.click(); } });
@@ -430,7 +461,7 @@ function rSpy(){
 }
 addEventListener('scroll', rSpy, { passive: true });
 document.addEventListener('click', e => { const a = e.target.closest('#rail a, [data-goto]'); if (!a) return; e.preventDefault(); const el = document.getElementById(a.getAttribute('href').slice(1)); if (el) el.scrollIntoView({ behavior: RM ? 'auto' : 'smooth', block: 'start' }); });
-function sceneIn(s){ if (s.classList.contains('in')) return; s.classList.add('in'); $$('[data-io]', s).forEach(el => bio ? bio.observe(el) : blockIn(el)); $$('.ty', s).forEach(tyRun); countIn(s); if (s.id === 'r-ai') setTimeout(() => qShow(true), RM ? 0 : 700); }
+function sceneIn(s){ if (s.classList.contains('in')) return; s.classList.add('in'); $$('[data-io]', s).forEach(el => bio ? bio.observe(el) : blockIn(el)); $$('.ty', s).forEach(tyRun); countIn(s); if (s.id === 'r-ai') setTimeout(() => { qShow(true); qAuto(true); }, RM ? 0 : 700); if (s.id === 'r-map') setTimeout(() => $('#rmap').classList.add('ready'), RM ? 0 : 2600); }
 const rio = 'IntersectionObserver' in window ? new IntersectionObserver(es => es.forEach(en => { if (en.isIntersecting){ rio.unobserve(en.target); sceneIn(en.target); } }), { threshold: .06, rootMargin: '0px 0px -14% 0px' }) : null;
 function countIn(root){
   $$('[data-count]', root || rpEl).forEach(el => { const to = +el.dataset.count, t0 = performance.now(), dur = RM ? 0 : 1400; (function f(now){ const p = dur ? Math.min(1, (now - t0) / dur) : 1; el.textContent = nf(Math.round(to * (1 - Math.pow(1 - p, 3)))); if (p < 1) requestAnimationFrame(f); })(t0); });
@@ -533,7 +564,7 @@ function renderAll(d){
   const ps = $('#pfseg [aria-pressed="true"]'); if (ps) segSet($('#pfseg'), ps.dataset.f, 'f');
 }
 function showReport(d, loading){
-  renderAll(d); window.scrollTo(0, 0); rCur = -1; tyRun($('#rName'));
+  renderAll(d); window.scrollTo(0, 0); rCur = -1; tyRun($('#rName')); cvFit();
   if (loading) runLoad(); else { loadTok++; prog.hidden = true; ldClear(); $$('.scn', rpEl).forEach(s => { if (rio) rio.observe(s); else sceneIn(s); }); kSet(T.kReport, dateZh(M.date)); }
   requestAnimationFrame(rSpy);
 }
@@ -568,8 +599,18 @@ function lightAll(){
   });
 }
 $$('[data-light]').forEach(lightPrep);
-const gio = 'IntersectionObserver' in window ? new IntersectionObserver(es => es.forEach(en => { if (en.isIntersecting){ en.target.classList.add('in'); gio.unobserve(en.target); } }), { threshold: .18 }) : null;
-$$('.gx').forEach(g => gio ? gio.observe(g) : g.classList.add('in'));
+const gio = 'IntersectionObserver' in window ? new IntersectionObserver(es => es.forEach(en => { if (en.isIntersecting){ gio.unobserve(en.target); blockIn(en.target); } }), { threshold: .18 }) : null;
+$$('.gx, [data-rv]').forEach(g => gio ? gio.observe(g) : blockIn(g));
+/* 首页的鼠标交互：首屏有一团光跟着走、右边面板微微转；展台和行动区里的光也跟着鼠标 */
+if (!RM){
+  const home = $('#v-home'), aura = $('.aura'), hero = $('.hero'), chatEl = $('#chat');
+  home.addEventListener('mousemove', e => { const r = aura.getBoundingClientRect(); aura.style.setProperty('--mx', (e.clientX - r.left) + 'px'); aura.style.setProperty('--my', (e.clientY - r.top) + 'px'); });
+  hero.addEventListener('mousemove', e => { const r = hero.getBoundingClientRect(); chatEl.style.setProperty('--ry', (((e.clientX - r.left) / r.width - .5) * -7).toFixed(2)); chatEl.style.setProperty('--rx', (((e.clientY - r.top) / r.height - .5) * 10).toFixed(2)); });
+  hero.addEventListener('mouseleave', () => { chatEl.style.setProperty('--ry', 0); chatEl.style.setProperty('--rx', 0); });
+  $$('.stage, .cta').forEach(el => el.addEventListener('mousemove', e => { const r = el.getBoundingClientRect(), x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height; el.style.setProperty('--mx', (x * 100).toFixed(1) + '%'); el.style.setProperty('--my', (y * 100).toFixed(1) + '%'); el.style.setProperty('--ry', ((x - .5) * 5).toFixed(2)); el.style.setProperty('--rx', ((.5 - y) * 4).toFixed(2)); }));
+  $('.stage').addEventListener('mouseleave', () => { const s = $('.stage'); s.style.setProperty('--ry', 0); s.style.setProperty('--rx', 0); });
+}
+document.addEventListener('click', e => { const a = e.target.closest('[data-jump]'); if (!a) return; e.preventDefault(); $(a.getAttribute('href')).scrollIntoView({ behavior: RM ? 'auto' : 'smooth', block: 'start' }); });
 
 function setHash(h){ try { history.replaceState(null, '', h || (location.pathname + location.search)); } catch (e) {} }
 function go(v){
@@ -577,7 +618,7 @@ function go(v){
   const sec = $(v === 'home' ? '#v-home' : '#v-report'); sec.classList.remove('view'); void sec.offsetWidth; sec.classList.add('view');
   window.scrollTo(0, 0);
 }
-function goHome(){ loadTok++; openTok++; KEY = ''; prog.hidden = true; document.body.classList.remove('ld-run-top'); go('home'); setHash(''); showCard(0); arm(); chatLoop(); requestAnimationFrame(lightAll); }
+function goHome(){ loadTok++; openTok++; KEY = ''; prog.hidden = true; document.body.classList.remove('ld-run-top'); const hv = $('#v-home'); hv.classList.add('intro'); setTimeout(() => hv.classList.remove('intro'), 2400);   /* 首屏的字依次升上来，只在进首页时放一次 */ go('home'); setHash(''); showCard(0); arm(); chatLoop(); requestAnimationFrame(lightAll); }
 /* 读一家店的结果。后台还在跑（status 不是 done）就每 1.5 秒再读一次 */
 let openTok = 0;
 async function openKey(key, loading){
@@ -602,6 +643,7 @@ $('#ask').addEventListener('submit', async e => {
   busy(false);
 });
 input.addEventListener('input', () => { if ($('#hint').classList.contains('err')) hintReset(); });
+document.addEventListener('click', e => { const b = e.target.closest('[data-try]'); if (b) openKey(b.dataset.try, true).catch(() => hintErr(T.netFail)); });
 document.addEventListener('click', e => {
   const a = e.target.closest('#toDemo,#other,#toHow,#toGeo,#ctaBtn,#rCta,#rAgain'); if (!a) return;
   e.preventDefault();
@@ -611,7 +653,7 @@ document.addEventListener('click', e => {
   if (a.id === 'rCta') return toast(T.ctaToast);
   if (a.id === 'other' || a.id === 'rAgain'){ goHome(); setTimeout(() => { input.value = ''; input.focus(); }, 80); }
 });
-addEventListener('scroll', () => { $('#top').classList.toggle('scrolled', scrollY > 8); if (view === 'home') lightAll(); }, { passive: true });
+addEventListener('scroll', () => { if (view === 'home') lightAll(); }, { passive: true });
 addEventListener('resize', () => {
   placeHL();
   if (view !== 'report') return;
